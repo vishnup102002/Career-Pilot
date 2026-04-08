@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Career-Pilot | Auto Apply</title>
+    <!-- Use modern Google Fonts for a highly aesthetic typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Background animated aesthetic orbs -->
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+    </div>
+
+    <main class="container">
+        <header>
+            <h1>Career-Pilot</h1>
+            <p>Your AI Agentic Job Intelligence Ecosystem</p>
+        </header>
+
+        <!-- Glassmorphism interface card -->
+        <section class="glass-card">
+            <form id="onboarding-form">
+                
+                <div class="input-group file-upload">
+                    <label for="resume">1. Upload Resume (PDF or TXT)</label>
+                    <div class="file-drop-area" id="file-drop-area">
+                        <span class="file-message">Drag & drop or Click to upload</span>
+                        <input type="file" id="resume" name="resume" accept=".pdf,.txt" required>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="email">2. Notification Email</label>
+                    <input type="email" id="email" name="email" placeholder="you@example.com" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="whatsapp">3. WhatsApp Number (Twilio format)</label>
+                    <input type="tel" id="whatsapp" name="whatsapp" placeholder="+1234567890" required>
+                </div>
+
+                <button type="submit" id="submit-btn">
+                    <span class="btn-text">Boot Agentic Workflow</span>
+                    <div class="loader" id="loader"></div>
+                </button>
+            </form>
+            
+            <div id="status-message" class="hidden"></div>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
