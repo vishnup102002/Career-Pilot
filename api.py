@@ -45,9 +45,9 @@ async def lifespan(app: FastAPI):
     
     # Initialize the Cron Scheduler
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(run_daily_hunt, 'cron', hour=9, minute=0) # Runs daily at 9:00 AM
+    scheduler.add_job(run_daily_hunt, 'cron', hour=9, minute=0, timezone='Asia/Kolkata') # Runs daily at 9:00 AM IST
     scheduler.start()
-    print("⏰ APScheduler Cron Job Armed for 9:00 AM daily!")
+    print("⏰ APScheduler Cron Job Armed for 9:00 AM IST daily!")
     
     yield
     scheduler.shutdown()
