@@ -3,7 +3,9 @@
 venv/
 
 # Databases
-db/
+db/*.db
+db/*.pdf
+db/resume_chroma/
 
 # Python cache
 __pycache__/
