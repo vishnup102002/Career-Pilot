@@ -213,7 +213,7 @@ form.addEventListener('submit', async (e) => {
         
         if (response.ok) {
             statusMessage.className = 'success';
-            statusMessage.textContent = "✅ LangGraph agents successfully deployed! You will be notified shortly via Email.";
+            statusMessage.textContent = "✅ LangGraph agents successfully deployed! You will be notified shortly via Email. (Note: Please check your Spam folder!)";
             form.reset();
             locations = [];
             updateLocationTags();
