@@ -1,11 +1,11 @@
 import sqlite3
 import os
 
-DB_PATH = "db/career_pilot.db"
+DB_PATH = "data/career_pilot.db"
 
 def init_db():
-    if not os.path.exists("db"):
-        os.makedirs("db")
+    if not os.path.exists("data"):
+        os.makedirs("data")
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -33,7 +33,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("📁 SQLite DB Initialized natively at `db/career_pilot.db`!")
+    print("📁 SQLite DB Initialized natively at `data/career_pilot.db`!")
 
 def insert_user(email: str, locations: str, resume_text: str):
     conn = sqlite3.connect(DB_PATH)
