@@ -1,6 +1,5 @@
 import os
-import smtplib
-from email.mime.text import MIMEText
+import requests
 from agents.state import AgentState
 from db.database import log_sent_job
 
@@ -17,25 +16,28 @@ def alert_node(state: AgentState):
     # Email Notification
     try:
         sender = os.getenv("EMAIL_SENDER")
-        password = os.getenv("EMAIL_PASSWORD")
+        api_key = os.getenv("SENDGRID_API_KEY")
         target_email = state.get("email_address", sender).strip()
         
-        if sender and password:
-            msg = MIMEText(f"{draft}")
-            msg['Subject'] = 'Career-Pilot 🚀 Your Daily Agentic Job Hunt'
-            msg['From'] = sender
-            msg['To'] = target_email
+        if sender and api_key:
+            url = "https://api.sendgrid.com/v3/mail/send"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "personalizations": [{"to": [{"email": target_email}]}],
+                "from": {"email": sender, "name": "Career-Pilot"},
+                "subject": "Career-Pilot 🚀 Your Daily Agentic Job Hunt",
+                "content": [{"type": "text/plain", "value": draft}]
+            }
             
-            server = smtplib.SMTP('smtp.gmail.com', 587)
-            server.ehlo()
-            server.starttls()
-            server.login(sender, password)
-            server.send_message(msg)
-            server.quit()
-            print("✅ Email Alert Fired Successfully!")
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            print("✅ SendGrid API Alert Fired Successfully!")
         else:
-            print("⚠️ Skipping Email Notification: Missing .env keys")
+            print("⚠️ Skipping Email Notification: Missing SENDGRID_API_KEY")
     except Exception as e:
-        print("❌ SMTP Email failed:", str(e))
+        print("❌ SendGrid API Email failed:", str(e))
         
     return {"human_approval": "alerted"}
