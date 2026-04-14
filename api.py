@@ -119,10 +119,10 @@ async def initialize_pipeline(
     email: str = Form(...),
     locations: str = Form(...)
 ):
-    if not os.path.exists("db"):
-        os.makedirs("db")
+    if not os.path.exists("data"):
+        os.makedirs("data")
         
-    file_location = f"db/{resume.filename}"
+    file_location = f"data/{resume.filename}"
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(resume.file, buffer)
         
