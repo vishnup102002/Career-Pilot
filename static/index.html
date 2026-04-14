@@ -1,13 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Career-Pilot | Auto Apply</title>
-    <!-- Use modern Google Fonts for a highly aesthetic typography -->
+    
+    <!-- Primary Meta Tags -->
+    <title>Career-Pilot | AI Agentic Job Hunter</title>
+    <meta name="title" content="Career-Pilot | AI Agentic Job Hunter">
+    <meta name="description" content="Career-Pilot uses AI agents to automatically find and match jobs to your resume, skills, and preferred locations. Get job alerts directly via WhatsApp.">
+    <meta name="keywords" content="AI job search, autonomous job hunter, AI resume matching, career agent, job alerts, career pilot, automated job application">
+    <meta name="author" content="Career-Pilot">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://careerpilot.com/">
+    <meta property="og:title" content="Career-Pilot | AI Agentic Job Hunter">
+    <meta property="og:description" content="Career-Pilot uses AI agents to automatically find and match jobs to your resume, skills, and preferred locations.">
+    <meta property="og:image" content="https://careerpilot.com/static/og-image.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://careerpilot.com/">
+    <meta property="twitter:title" content="Career-Pilot | AI Agentic Job Hunter">
+    <meta property="twitter:description" content="Career-Pilot uses AI agents to automatically find and match jobs to your resume, skills, and preferred locations.">
+    
+    <!-- Canonical Link -->
+    <link rel="canonical" href="https://careerpilot.com/">
+
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
+
 <body>
     <!-- Background animated aesthetic orbs -->
     <div class="background-orbs">
@@ -18,13 +42,13 @@
     <main class="container">
         <header>
             <h1>Career-Pilot</h1>
-            <p>Your AI Agentic Job Intelligence Ecosystem</p>
+            <p>Your Job Hunting Agent</p>
         </header>
 
         <!-- Glassmorphism interface card -->
         <section class="glass-card">
             <form id="onboarding-form">
-                
+
                 <div class="input-group file-upload">
                     <label for="resume">1. Upload Resume (PDF or TXT)</label>
                     <div class="file-drop-area" id="file-drop-area">
@@ -39,8 +63,14 @@
                 </div>
 
                 <div class="input-group">
-                    <label for="whatsapp">3. WhatsApp Number (Twilio format)</label>
-                    <input type="tel" id="whatsapp" name="whatsapp" placeholder="+1234567890" required>
+                    <label for="locations">3. Preferred Locations</label>
+                    <div class="tags-container" id="tags-container">
+                        <input type="text" id="location-input" placeholder="Type a city & press Enter"
+                            autocomplete="off">
+                    </div>
+                    <input type="hidden" id="locations" name="locations">
+                    <span class="helper-text">Press Enter or comma to add multiple locations (e.g. Bangalore, Remote,
+                        Mumbai)</span>
                 </div>
 
                 <button type="submit" id="submit-btn">
@@ -48,11 +78,12 @@
                     <div class="loader" id="loader"></div>
                 </button>
             </form>
-            
+
             <div id="status-message" class="hidden"></div>
         </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2"></script>
 </body>
+
 </html>
