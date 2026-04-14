@@ -26,7 +26,9 @@ def alert_node(state: AgentState):
             msg['From'] = sender
             msg['To'] = target_email
             
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.ehlo()
+            server.starttls()
             server.login(sender, password)
             server.send_message(msg)
             server.quit()
