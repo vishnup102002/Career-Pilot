@@ -2,6 +2,9 @@ import json
 import re
 import os
 import http.client
+import asyncio
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from langchain_core.messages import HumanMessage
 from agents.state import AgentState
 from agents.config import llm
@@ -40,6 +43,39 @@ def serper_search(query, num_results=10):
             })
     except Exception as e:
         print(f"   ⚠️ Serper search failed: {e}")
+        
+    return results
+
+async def scrape_urls_with_mcp(urls):
+    """
+    Connects to the local Browser MCP Server to scrape full job descriptions.
+    """
+    if not urls:
+        return []
+        
+    server_params = StdioServerParameters(
+        command="python",
+        args=["mcp_servers/browser_mcp.py"],
+    )
+    
+    results = []
+    try:
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                for url in urls:
+                    try:
+                        print(f"   🤖 MCP Client: Asking Browser Server to scrape -> {url}")
+                        res = await session.call_tool("scrape_job_description", arguments={"url": url})
+                        if res.content and len(res.content) > 0:
+                            results.append({
+                                "url": url, 
+                                "full_text": res.content[0].text
+                            })
+                    except Exception as scrape_err:
+                        print(f"   ⚠️ MCP Client failed to scrape {url}: {scrape_err}")
+    except Exception as e:
+        print(f"   🚨 Failed to connect to MCP Server: {e}")
         
     return results
 
@@ -101,7 +137,22 @@ Reply with ONLY the query string, nothing else. No quotes."""
         print("⚠️ ScoutAgent: No results from Serper. Skipping LLM matching.")
         return {"found_jobs": "NO STRICT MATCHES FOUND TODAY. The job search returned zero results. Please try again later.", "extracted_urls": []}
 
-    scraped_text = json.dumps(scraped_data, indent=2)
+    # Extract top 3 URLs for deep scraping via MCP Client
+    top_urls = [data.get('href') for data in scraped_data[:3] if data.get('href')]
+    
+    print(f"🕵️  ScoutAgent: Booting MCP Browser Server to deep-read top {len(top_urls)} jobs...")
+    try:
+        deep_scraped = asyncio.run(scrape_urls_with_mcp(top_urls))
+    except Exception as e:
+        print(f"   ⚠️ MCP invocation error: {e}")
+        deep_scraped = []
+
+    if deep_scraped:
+        scraped_text = json.dumps(deep_scraped, indent=2)
+        print("   ✅ MCP Deep Scrape complete. Feeding FULL JOB DESCRIPTIONS to the LLM.")
+    else:
+        scraped_text = json.dumps(scraped_data, indent=2)
+        print("   ⚠️ Falling back to Serper snippets.")
 
     print("🕵️  ScoutAgent: Matching Serper Google results against Resume + Preferences...")
     prompt = f"""
