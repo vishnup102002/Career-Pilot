@@ -213,19 +213,19 @@ form.addEventListener('submit', async (e) => {
         
         if (response.ok) {
             statusMessage.className = 'success';
-            statusMessage.textContent = "✅ LangGraph agents successfully deployed! You will be notified shortly via Email. (Note: Please check your Spam folder!)";
+            statusMessage.textContent = "✅ Job hunting started successfully! You will be notified shortly via Email. (Note: Please check your Spam folder!)";
             form.reset();
             locations = [];
             updateLocationTags();
             updateFileMessage();
         } else {
             statusMessage.className = 'error';
-            statusMessage.textContent = `❌ Agent deployment failed: ${data.detail || 'Unknown error'}`;
+            statusMessage.textContent = `❌ Failed to start job search: ${data.detail || 'Unknown error'}`;
         }
         
     } catch (error) {
         statusMessage.className = 'error';
-        statusMessage.textContent = "❌ Failed to reach the Python Multi-Agent server.";
+        statusMessage.textContent = "❌ Failed to connect to the server. Please try again later.";
     } finally {
         btnText.style.display = 'block';
         loader.style.display = 'none';
