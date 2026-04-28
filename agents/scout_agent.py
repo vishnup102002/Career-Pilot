@@ -176,9 +176,9 @@ Reply with ONLY the query string, nothing else. No quotes."""
     YOUR STRICT EVALUATION RULES:
     1. JOB ROLE MATCH: The job title/description must closely match "{preferred_job}". Unrelated roles must be instantly rejected.
     2. LOCATION MATCH: The job must be in one of these locations: {locations}, or be a remote position.
-    3. EXPERIENCE MATCH: If the job requires minimum years of experience (e.g., "2+ years") and the User is a fresher or intern, you MUST instantly reject it.
+    3. CRITICAL EXPERIENCE MATCH: The User's experience level MUST strictly match or exceed the job's minimum experience requirements. If the job requires more experience than the User currently possesses, you MUST instantly reject it. ZERO EXCEPTIONS. Do not ignore experience mismatch even if their skills align perfectly.
     4. EDUCATION MATCH: If the job requires a specific Degree and the User's profile does not state they have it, reject it.
-    5. SKILL MATCH: The User must possess the core mandatory capabilities from the job description.
+    5. SKILL MATCH: The User MUST possess the core mandatory technical skills required by the job description.
     
     If NO jobs pass ALL 5 rules, you MUST simply reply: "NO STRICT MATCHES FOUND TODAY."
     
