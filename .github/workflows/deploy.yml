@@ -2,7 +2,7 @@ name: Deploy to Hugging Face Space
 on:
   push:
     branches:
-      - main # Triggers when you push to main
+      - master # Triggers when you push to master
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,4 +15,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push https://Vishnuporkulath:$HF_TOKEN@https://huggingface.co/spaces/Vishnuporkulath/career-pilot main -f
+          git push https://Vishnuporkulath:$HF_TOKEN@huggingface.co/spaces/Vishnuporkulath/career-pilot master:main -f
