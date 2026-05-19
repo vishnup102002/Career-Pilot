@@ -1,3 +1,11 @@
+---
+title: Career Pilot
+emoji: 🚀
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
 This is a high-signal project for your 2026 portfolio. It demonstrates that you understand Model Context Protocol (MCP), Stateful Agents (LangGraph), and the ethical balance of Human-in-the-Loop AI.
 Below is a professional README.md designed to impress a CTO at a company like Alchemyst AI. It positions you not as a "spammer," but as an AI Orchestrator.
 
