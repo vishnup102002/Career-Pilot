@@ -94,7 +94,11 @@ async def debug_pipeline():
         "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
         "USE_GEMINI": os.getenv("USE_GEMINI", "false"),
         "LLM_LOADED": configured_llm is not None,
-        "LLM_TYPE": str(type(configured_llm).__name__) if configured_llm else "None"
+        "LLM_TYPE": str(type(configured_llm).__name__) if configured_llm else "None",
+        "SENDGRID_API_KEY": bool(os.getenv("SENDGRID_API_KEY")),
+        "SENDGRID_KEY_PREFIX": os.getenv("SENDGRID_API_KEY", "")[:8] + "..." if os.getenv("SENDGRID_API_KEY") else "MISSING",
+        "EMAIL_SENDER": bool(os.getenv("EMAIL_SENDER")),
+        "EMAIL_SENDER_VALUE": os.getenv("EMAIL_SENDER", "")
     }
     
     # 2. Test Serper - raw HTTP call to see actual response
