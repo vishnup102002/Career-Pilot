@@ -68,6 +68,85 @@ async def get_robots():
 async def get_sitemap():
     return FileResponse("static/sitemap.xml", media_type="application/xml")
 
+@app.get("/api/debug")
+async def debug_pipeline():
+    """
+    Diagnostic endpoint to test every stage of the pipeline.
+    Hit this to see exactly where things break on HF Spaces.
+    """
+    import json as json_mod
+    from agents.scout_agent import serper_search, is_direct_job_url
+    from agents.config import llm as configured_llm
+    
+    results = {
+        "env_vars": {},
+        "serper_test": {},
+        "url_filter_test": {},
+        "llm_test": {},
+        "overall": "UNKNOWN"
+    }
+    
+    # 1. Check env vars
+    results["env_vars"] = {
+        "SERPER_API_KEY": bool(os.getenv("SERPER_API_KEY")),
+        "SERPER_KEY_PREFIX": os.getenv("SERPER_API_KEY", "")[:8] + "..." if os.getenv("SERPER_API_KEY") else "MISSING",
+        "GROQ_API_KEY": bool(os.getenv("GROQ_API_KEY")),
+        "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
+        "USE_GEMINI": os.getenv("USE_GEMINI", "false"),
+        "LLM_LOADED": configured_llm is not None,
+        "LLM_TYPE": str(type(configured_llm).__name__) if configured_llm else "None"
+    }
+    
+    # 2. Test Serper
+    try:
+        test_results = serper_search("AI Engineer jobs India", num_results=5)
+        results["serper_test"] = {
+            "status": "OK" if test_results else "EMPTY",
+            "count": len(test_results),
+            "sample": [{"title": r.get("title","")[:60], "url": r.get("href","")[:80]} for r in test_results[:3]]
+        }
+    except Exception as e:
+        results["serper_test"] = {"status": "ERROR", "error": str(e)}
+    
+    # 3. Test URL filter on real results
+    if results["serper_test"].get("status") == "OK":
+        try:
+            site_results = serper_search("site:linkedin.com/jobs/view/ AI Engineer India", num_results=5)
+            direct = [r for r in site_results if is_direct_job_url(r.get("href", ""))]
+            results["url_filter_test"] = {
+                "status": "OK",
+                "site_query_count": len(site_results),
+                "direct_after_filter": len(direct),
+                "sample_direct": [{"title": r.get("title","")[:60], "url": r.get("href","")[:80]} for r in direct[:3]]
+            }
+        except Exception as e:
+            results["url_filter_test"] = {"status": "ERROR", "error": str(e)}
+    
+    # 4. Test LLM
+    if configured_llm:
+        try:
+            from langchain_core.messages import HumanMessage
+            resp = configured_llm.invoke([HumanMessage(content="Reply with only the word: WORKING")])
+            results["llm_test"] = {
+                "status": "OK",
+                "response": resp.content[:50]
+            }
+        except Exception as e:
+            results["llm_test"] = {"status": "ERROR", "error": str(e)}
+    else:
+        results["llm_test"] = {"status": "NO_LLM", "error": "No LLM configured"}
+    
+    # Overall
+    all_ok = (
+        results["env_vars"]["SERPER_API_KEY"] and
+        results["env_vars"]["LLM_LOADED"] and
+        results["serper_test"].get("status") == "OK" and
+        results["llm_test"].get("status") == "OK"
+    )
+    results["overall"] = "ALL_SYSTEMS_GO" if all_ok else "ISSUES_DETECTED"
+    
+    return results
+
 def run_onboarding_workflow(resume_path: str, email: str, locations: str):
     """
     Fires immediately when the user uploads a resume strictly for onboarding.
