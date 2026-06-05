@@ -24,7 +24,9 @@ def serper_search(query, num_results=10):
         conn = http.client.HTTPSConnection("google.serper.dev")
         payload = json.dumps({
           "q": query,
-          "num": num_results
+          "num": num_results,
+          "gl": "in",  # Force India results regardless of server location
+          "hl": "en"   # English results
         })
         headers = {
           'X-API-KEY': api_key,
@@ -32,8 +34,13 @@ def serper_search(query, num_results=10):
         }
         conn.request("POST", "/search", payload, headers)
         res = conn.getresponse()
+        status_code = res.status
         data = res.read()
         json_data = json.loads(data.decode("utf-8"))
+        
+        if status_code != 200:
+            print(f"   ⚠️ Serper API returned status {status_code}: {json_data}")
+            return []
         
         # Parse organic results
         for item in json_data.get("organic", []):
@@ -42,6 +49,9 @@ def serper_search(query, num_results=10):
                 "href": item.get("link", ""),
                 "body": item.get("snippet", ""),
             })
+        
+        if not results:
+            print(f"   ⚠️ Serper returned 0 organic results. Raw keys: {list(json_data.keys())}")
     except Exception as e:
         print(f"   ⚠️ Serper search failed: {e}")
         

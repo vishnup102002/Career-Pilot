@@ -97,13 +97,26 @@ async def debug_pipeline():
         "LLM_TYPE": str(type(configured_llm).__name__) if configured_llm else "None"
     }
     
-    # 2. Test Serper
+    # 2. Test Serper - raw HTTP call to see actual response
     try:
-        test_results = serper_search("AI Engineer jobs India", num_results=5)
+        import http.client
+        import json as json_lib
+        conn = http.client.HTTPSConnection("google.serper.dev")
+        payload = json_lib.dumps({"q": "AI Engineer jobs India", "num": 3, "gl": "in", "hl": "en"})
+        headers = {'X-API-KEY': os.getenv("SERPER_API_KEY", ""), 'Content-Type': 'application/json'}
+        conn.request("POST", "/search", payload, headers)
+        res = conn.getresponse()
+        raw_data = res.read().decode("utf-8")
+        raw_json = json_lib.loads(raw_data)
+        
+        organic = raw_json.get("organic", [])
         results["serper_test"] = {
-            "status": "OK" if test_results else "EMPTY",
-            "count": len(test_results),
-            "sample": [{"title": r.get("title","")[:60], "url": r.get("href","")[:80]} for r in test_results[:3]]
+            "status": "OK" if organic else "EMPTY",
+            "http_status": res.status,
+            "count": len(organic),
+            "raw_keys": list(raw_json.keys()),
+            "raw_snippet": raw_data[:500] if not organic else None,
+            "sample": [{"title": r.get("title","")[:60], "url": r.get("link","")[:80]} for r in organic[:3]]
         }
     except Exception as e:
         results["serper_test"] = {"status": "ERROR", "error": str(e)}
