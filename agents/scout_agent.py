@@ -196,6 +196,15 @@ def is_high_signal_text(text: str) -> bool:
     return True
 
 def scout_node(state: AgentState):
+    try:
+        return _scout_node_inner(state)
+    except Exception as e:
+        print(f"🚨 ScoutAgent CRASHED: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"found_jobs": f"NO STRICT MATCHES FOUND TODAY. (Pipeline error: {str(e)[:100]})", "extracted_urls": []}
+
+def _scout_node_inner(state: AgentState):
     preferred_job = state.get('preferred_job', '').strip()
     locations = state.get('locations', '').strip()
     resume_summary = state.get('resume_summary', '')
@@ -312,44 +321,20 @@ Reply with ONLY the query string, nothing else. No quotes."""
         print(f"   📊 DIAGNOSTIC: {len(search_queries)} queries executed, {len(all_results)} total results, 0 after filtering")
         return {"found_jobs": "NO STRICT MATCHES FOUND TODAY. The job search returned zero results. Please try again later.", "extracted_urls": []}
 
-    # Extract top 5 URLs for deep scraping via MCP Client
-    top_urls = [data.get('href') for data in scraped_data[:5] if data.get('href')]
+    # Skip MCP deep scraping — use Serper snippets directly for speed and reliability
+    # MCP Browser server crashes on HF Spaces due to Playwright/Chromium issues
+    print(f"🕵️  ScoutAgent: Using Serper snippets for top {min(len(scraped_data), 8)} jobs (skipping deep scrape for reliability)...")
     
-    print(f"🕵️  ScoutAgent: Booting MCP Browser Server to deep-read top {len(top_urls)} jobs...")
-    try:
-        deep_scraped = asyncio.run(scrape_urls_with_mcp(top_urls))
-    except Exception as e:
-        print(f"   ⚠️ MCP invocation error: {e}")
-        deep_scraped = []
-
-    # Build final list of job descriptions.
-    # If deep scraping succeeded and returned high-signal text, use it.
-    # Otherwise, fallback to the Serper Google snippet.
     final_job_data = []
     for data in scraped_data[:8]:
         url = data.get('href')
-        # Check if we have deep-scraped text for this URL
-        deep_match = next((item for item in deep_scraped if item['url'] == url), None)
-        
-        if deep_match and is_high_signal_text(deep_match['full_text']):
-            final_job_data.append({
-                "title": data.get('title'),
-                "href": url,
-                "text_source": "mcp_deep_scrape",
-                "content": deep_match['full_text'][:4000] # Limit size to avoid LLM context bloat
-            })
-            print(f"   ✅ Using FULL deep-scraped text for: {url}")
-        else:
-            final_job_data.append({
-                "title": data.get('title'),
-                "href": url,
-                "text_source": "serper_snippet",
-                "content": data.get('body')
-            })
-            if deep_match:
-                print(f"   ⚠️ Scraped text for {url} looks like a login wall or captcha. Falling back to Serper Google snippet.")
-            else:
-                print(f"   ℹ️ Using Serper snippet for: {url}")
+        final_job_data.append({
+            "title": data.get('title'),
+            "href": url,
+            "text_source": "serper_snippet",
+            "content": data.get('body')
+        })
+        print(f"   ℹ️ {data.get('title', '')[:60]} -> {url[:70]}")
     
     print(f"   📊 Sending {len(final_job_data)} candidates to LLM for matching")
 
