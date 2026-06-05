@@ -84,23 +84,46 @@ def is_direct_job_url(url: str) -> bool:
     """
     Heuristics to determine if a URL points to a specific direct job description page,
     rather than a search results aggregator / search index page.
+    Returns True ONLY for URLs that clearly point to a single job posting.
     """
     lowercase_url = url.lower()
     
-    # 1. Common aggregator/listing index indicators to instantly reject
+    # 1. Aggressively reject known aggregator / listing index patterns
     aggregator_indicators = [
-        "/q-", "/jobs-in-", "/l-", "indeed.com/q-", "indeed.com/l-", 
-        "glassdoor.com/job/us-", "wellfound.com/role/", "wellfound.com/location/",
-        "remoterocketship.com/us/jobs/", "linkedin.com/jobs/search",
-        "linkedin.com/jobs/collections", "naukri.com/jobs-in", "naukri.com/software-developer-jobs",
-        "glassdoor.com/job/browse"
+        # Indeed/LinkedIn listing pages
+        "/q-", "/l-", "indeed.com/q-", "indeed.com/l-", 
+        "q-generative", "q-ai", "q-junior", "q-software",
+        "jobs.html", "-jobs.html", "-jobs?",
+        # LinkedIn listing pages
+        "linkedin.com/jobs/search", "linkedin.com/jobs/collections",
+        "linkedin.com/jobs/artificial", "linkedin.com/jobs/ai-",
+        "linkedin.com/jobs/software", "linkedin.com/jobs/machine",
+        # Glassdoor/Wellfound listing pages
+        "glassdoor.com/job/us-", "glassdoor.co.in/job/",
+        "glassdoor.com/job/browse", "srch_",
+        "wellfound.com/role/", "wellfound.com/location/",
+        # Naukri listing pages 
+        "naukri.com/jobs-in", "naukri.com/software-developer-jobs",
+        "naukri.com/generative-ai-jobs", "naukri.com/ai-engineer-jobs",
+        "naukri.com/machine-learning-jobs",
+        # Other aggregators
+        "remoterocketship.com/us/jobs/",
+        "ambitionbox.com/jobs/", "internshala.com/jobs/",
+        "hirist.tech/", "cybotrix.com/jobs/",
+        # Generic search/results pages
+        "jobs/results", "/about/careers/applications/jobs/results",
+        "/work-from-home/"
     ]
     
     for indicator in aggregator_indicators:
         if indicator in lowercase_url:
             return False
+    
+    # Also reject if URL ends with a broad listing pattern
+    if re.search(r'linkedin\.com/jobs/[a-z-]+-jobs-[a-z]+', lowercase_url):
+        return False  # e.g. linkedin.com/jobs/artificial-intelligence-jobs-kochi
             
-    # 2. Known direct job page patterns (including Indian job boards)
+    # 2. Known DIRECT single-job page patterns (very specific)
     direct_patterns = [
         "linkedin.com/jobs/view/",
         "indeed.com/viewjob",
@@ -110,29 +133,27 @@ def is_direct_job_url(url: str) -> bool:
         "weworkremotely.com/remote-jobs/",
         "glassdoor.com/job-listing",
         "glassdoor.co.in/job-listing",
-        "wellfound.com/jobs/",
         "naukri.com/job-listings",
         "instahyre.com/job/",
         "foundit.in/job/",
-        "cutshort.io/jobs/",
-        "upwork.com/jobs/",
-        "lever.co",
-        "greenhouse.io",
-        "boards.greenhouse.io",
-        "jobs.lever.co",
-        "careers.",
-        "jobs.",
-        "/job/",
-        "/jobs/",
-        "/careers/"
+        "cutshort.io/job/",
+        "lever.co/",
+        "greenhouse.io/",
+        "boards.greenhouse.io/",
+        "jobs.lever.co/",
+        "getmereferred.com/job-listing/",
     ]
     
     for pattern in direct_patterns:
         if pattern in lowercase_url:
             return True
             
-    # 3. If the URL contains '/jobs/number' or similar, it's likely a direct job page
+    # 3. URL contains /job(s)/ID pattern — a specific job posting
     if re.search(r'/jobs?/\d+', lowercase_url) or re.search(r'/job-/[a-z0-9]+', lowercase_url):
+        return True
+    
+    # 4. Company career pages with a specific job ID
+    if re.search(r'careers?\..+/jobs?/.+', lowercase_url):
         return True
         
     return False
@@ -197,24 +218,29 @@ def scout_node(state: AgentState):
     search_queries = []
     for term in search_terms[:3]: # Limit to top 3 search terms to prevent query explosion
         for location in location_list:
-            # Check if the location is in India or remote to target local/remote India job postings
             is_india_or_local = any(loc in location.lower() for loc in ["kochi", "bangalore", "mumbai", "delhi", "hyderabad", "chennai", "pune", "india"])
             loc_suffix = f"{location} India" if (is_india_or_local and "india" not in location.lower()) else location
             
-            # OPEN WEB QUERIES (highest priority — no site: restriction)
-            search_queries.append(f'{term} jobs {loc_suffix} 2025')
-            search_queries.append(f'{term} hiring {loc_suffix}')
+            # SITE-SPECIFIC queries FIRST — these return actual job pages, not aggregators
+            search_queries.append(f'site:linkedin.com/jobs/view/ {term} {loc_suffix}')
+            search_queries.append(f'site:indeed.com/viewjob {term} {loc_suffix}')
         
-        # Site-specific queries as supplementary sources
+        # Broader site-specific queries
         search_queries.append(f'site:linkedin.com/jobs/view/ {term} India')
-        search_queries.append(f'site:naukri.com {term}')
+        search_queries.append(f'site:indeed.com/viewjob {term} India')
+        search_queries.append(f'site:naukri.com/job-listings {term}')
         
-        # Remote search queries
-        search_queries.append(f'{term} remote jobs India 2025')
+        # Remote search
+        search_queries.append(f'site:linkedin.com/jobs/view/ {term} remote')
         search_queries.append(f'site:weworkremotely.com/remote-jobs/ {term}')
+    
+    # OPEN WEB queries as fallback — these return a mix of aggregators and direct pages
+    for term in search_terms[:2]:
+        search_queries.append(f'{term} jobs India apply 2025')
+        search_queries.append(f'{term} hiring India')
         
-    # Limit queries to 12 to balance coverage vs API cost
-    search_queries = list(dict.fromkeys(search_queries))[:12]
+    # Limit queries to 14 to balance coverage vs API cost
+    search_queries = list(dict.fromkeys(search_queries))[:14]
     
     # LLM-optimized extra query
     if llm and resume_summary:
@@ -252,17 +278,24 @@ Reply with ONLY the query string, nothing else. No quotes."""
     
     # Filter Serper results to prioritize direct job description URLs
     direct_job_results = [r for r in all_results if is_direct_job_url(r.get('href', ''))]
+    rejected_results = [r for r in all_results if not is_direct_job_url(r.get('href', ''))]
     
-    # Smart fallback: if the filter drops >70% of results, it's being too aggressive — skip it
-    if direct_job_results and len(direct_job_results) >= len(all_results) * 0.3:
+    print(f"   📊 URL filter: {len(direct_job_results)} direct jobs, {len(rejected_results)} aggregator/listing pages rejected")
+    if rejected_results:
+        for r in rejected_results[:3]:
+            print(f"      ❌ Rejected: {r.get('href', '')[:80]}")
+    
+    # Use direct job results if we have enough, otherwise fall back to all results
+    if len(direct_job_results) >= 3:
         scraped_data = direct_job_results
-        print(f"   📊 After URL filter: {len(scraped_data)} direct job listings (from {len(all_results)} total)")
+        print(f"   ✅ Using {len(scraped_data)} direct job listings")
+    elif direct_job_results:
+        # We have some direct results but not enough — supplement with non-rejected results
+        scraped_data = direct_job_results + rejected_results
+        print(f"   ⚠️ Only {len(direct_job_results)} direct jobs found. Supplementing with all {len(scraped_data)} results.")
     else:
         scraped_data = all_results
-        if direct_job_results:
-            print(f"   ⚠️ URL filter too aggressive ({len(direct_job_results)}/{len(all_results)} passed). Using all results.")
-        else:
-            print(f"   ⚠️ No direct job URLs matched heuristics. Using all {len(all_results)} results.")
+        print(f"   ⚠️ No direct job URLs found. Using all {len(all_results)} results.")
 
     if len(scraped_data) == 0:
         print("⚠️ ScoutAgent: No results from Serper. Skipping LLM matching.")
