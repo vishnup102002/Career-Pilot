@@ -3,6 +3,12 @@ from agents.state import AgentState
 from agents.config import llm
 
 def writer_node(state: AgentState):
+    found_jobs = state.get('found_jobs', '').strip()
+    
+    if not found_jobs or "NO STRICT MATCHES FOUND TODAY" in found_jobs:
+        print("✍️  WriterAgent: No jobs found. Skipping formatting.")
+        return {"drafted_response": "NO STRICT MATCHES FOUND TODAY. We couldn't find any jobs that strictly match your profile (experience level, skills, and locations) today. We will check again tomorrow morning!"}
+
     print("✍️  WriterAgent: Formatting the final dispatch...")
     prompt = f"""
     You MUST format the jobs below into a clean, professional email-friendly message.
@@ -15,7 +21,7 @@ def writer_node(state: AgentState):
     - Exclude placeholders or generic recruiter text.
     
     Jobs to format:
-    {state.get('found_jobs', 'No jobs')}
+    {found_jobs}
     """
     response = llm.invoke([HumanMessage(content=prompt)]) if llm else type('obj', (object,), {'content': 'Here are your jobs!'})()
     return {"drafted_response": response.content}

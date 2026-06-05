@@ -1,6 +1,7 @@
 import json
 import re
 import os
+import sys
 import http.client
 import asyncio
 from mcp import ClientSession, StdioServerParameters
@@ -54,7 +55,7 @@ async def scrape_urls_with_mcp(urls):
         return []
         
     server_params = StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=["mcp_servers/browser_mcp.py"],
     )
     
@@ -79,6 +80,80 @@ async def scrape_urls_with_mcp(urls):
         
     return results
 
+def is_direct_job_url(url: str) -> bool:
+    """
+    Heuristics to determine if a URL points to a specific direct job description page,
+    rather than a search results aggregator / search index page.
+    """
+    lowercase_url = url.lower()
+    
+    # 1. Common aggregator/listing index indicators to instantly reject
+    aggregator_indicators = [
+        "/q-", "/jobs-in-", "/l-", "indeed.com/q-", "indeed.com/l-", 
+        "glassdoor.com/job/us-", "wellfound.com/role/", "wellfound.com/location/",
+        "remoterocketship.com/us/jobs/", "linkedin.com/jobs/search",
+        "linkedin.com/jobs/collections", "naukri.com/jobs-in", "naukri.com/software-developer-jobs",
+        "glassdoor.com/job/browse"
+    ]
+    
+    for indicator in aggregator_indicators:
+        if indicator in lowercase_url:
+            return False
+            
+    # 2. Known direct job page patterns
+    direct_patterns = [
+        "linkedin.com/jobs/view/",
+        "indeed.com/viewjob",
+        "indeed.com/rc/clk",
+        "weworkremotely.com/remote-jobs/",
+        "glassdoor.com/job-listing",
+        "glassdoor.co.in/job-listing",
+        "wellfound.com/jobs/",
+        "naukri.com/job-listings",
+        "upwork.com/jobs/",
+        "lever.co",
+        "greenhouse.io",
+        "/job/",
+        "/jobs/"
+    ]
+    
+    for pattern in direct_patterns:
+        if pattern in lowercase_url:
+            return True
+            
+    # 3. If the URL contains '/jobs/number' or similar, it's likely a direct job page
+    if re.search(r'/jobs?/\d+', lowercase_url) or re.search(r'/job-/[a-z0-9]+', lowercase_url):
+        return True
+        
+    return False
+
+def is_high_signal_text(text: str) -> bool:
+    """
+    Checks if the scraped text contains actual job description details
+    rather than a login wall, captcha, or redirect page.
+    """
+    if not text:
+        return False
+    lowercase_text = text.lower()
+    
+    # Check if we were blocked, redirected to login page, or hit access issues
+    blocked_indicators = [
+        "sign in", "login", "log in", "security check", "captcha", 
+        "check your browser", "robot", "forbidden", "access denied", 
+        "page not found", "error 403", "error 404", "failed to scrape"
+    ]
+    for indicator in blocked_indicators:
+        if indicator in lowercase_text and len(lowercase_text) < 1500:
+            return False
+            
+    # Check for presence of typical job description words
+    job_keywords = ["experience", "requirement", "qualification", "responsibilities", "skills", "description", "apply", "candidate", "about the role"]
+    matches = sum(1 for kw in job_keywords if kw in lowercase_text)
+    if matches < 2:
+        return False
+        
+    return True
+
 def scout_node(state: AgentState):
     preferred_job = state.get('preferred_job', '').strip()
     locations = state.get('locations', '').strip()
@@ -89,14 +164,25 @@ def scout_node(state: AgentState):
     # Build smart search queries using the user's preferred job + locations
     location_list = [loc.strip() for loc in locations.split(',') if loc.strip()]
     
-    # Generate search variations combining job role with each location
     search_queries = []
     
+    # 1. Target LinkedIn direct views
     for location in location_list:
-        search_queries.append(f"{preferred_job} jobs {location} apply")
+        search_queries.append(f'site:linkedin.com/jobs/view/ "{preferred_job}" {location}')
+    search_queries.append(f'site:linkedin.com/jobs/view/ "{preferred_job}" remote')
     
-    # Add remote/general query
-    search_queries.append(f"{preferred_job} jobs remote apply 2025 2026")
+    # 2. Target Indeed direct views
+    for location in location_list:
+        search_queries.append(f'site:indeed.com/viewjob "{preferred_job}" {location}')
+    search_queries.append(f'site:indeed.com/viewjob "{preferred_job}" remote')
+    
+    # 3. Target other known platforms direct URLs
+    search_queries.append(f'site:weworkremotely.com/remote-jobs/ "{preferred_job}"')
+    
+    # 4. Fallback generic queries
+    for location in location_list:
+        search_queries.append(f'"{preferred_job}" jobs {location} apply')
+    search_queries.append(f'"{preferred_job}" jobs remote apply 2025 2026')
     
     # LLM-optimized extra query
     if llm and resume_summary:
@@ -130,8 +216,15 @@ Reply with ONLY the query string, nothing else. No quotes."""
             print(f"   ⚠️ Search failed for '{query}': {e}")
             continue
     
-    scraped_data = all_results
-    print(f"   📊 Total unique results aggregated: {len(scraped_data)}")
+    # Filter Serper results to prioritize direct job description URLs
+    direct_job_results = [r for r in all_results if is_direct_job_url(r.get('href', ''))]
+    
+    if direct_job_results:
+        scraped_data = direct_job_results
+        print(f"   📊 Aggregated {len(scraped_data)} direct job listings (filtered down from {len(all_results)} total results)")
+    else:
+        scraped_data = all_results
+        print(f"   ⚠️ No direct job URLs matched heuristics. Falling back to all {len(all_results)} search results.")
 
     if len(scraped_data) == 0:
         print("⚠️ ScoutAgent: No results from Serper. Skipping LLM matching.")
@@ -147,12 +240,36 @@ Reply with ONLY the query string, nothing else. No quotes."""
         print(f"   ⚠️ MCP invocation error: {e}")
         deep_scraped = []
 
-    if deep_scraped:
-        scraped_text = json.dumps(deep_scraped, indent=2)
-        print("   ✅ MCP Deep Scrape complete. Feeding FULL JOB DESCRIPTIONS to the LLM.")
-    else:
-        scraped_text = json.dumps(scraped_data, indent=2)
-        print("   ⚠️ Falling back to Serper snippets.")
+    # Build final list of job descriptions.
+    # If deep scraping succeeded and returned high-signal text, use it.
+    # Otherwise, fallback to the Serper Google snippet.
+    final_job_data = []
+    for data in scraped_data[:3]:
+        url = data.get('href')
+        # Check if we have deep-scraped text for this URL
+        deep_match = next((item for item in deep_scraped if item['url'] == url), None)
+        
+        if deep_match and is_high_signal_text(deep_match['full_text']):
+            final_job_data.append({
+                "title": data.get('title'),
+                "href": url,
+                "text_source": "mcp_deep_scrape",
+                "content": deep_match['full_text'][:4000] # Limit size to avoid LLM context bloat
+            })
+            print(f"   ✅ Using FULL deep-scraped text for: {url}")
+        else:
+            final_job_data.append({
+                "title": data.get('title'),
+                "href": url,
+                "text_source": "serper_snippet",
+                "content": data.get('body')
+            })
+            if deep_match:
+                print(f"   ⚠️ Scraped text for {url} looks like a login wall or captcha. Falling back to Serper Google snippet.")
+            else:
+                print(f"   ⚠️ Falling back to Serper Google snippet for: {url}")
+
+    scraped_text = json.dumps(final_job_data, indent=2)
 
     print("🕵️  ScoutAgent: Matching Serper Google results against Resume + Preferences...")
     prompt = f"""
