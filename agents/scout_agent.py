@@ -100,21 +100,31 @@ def is_direct_job_url(url: str) -> bool:
         if indicator in lowercase_url:
             return False
             
-    # 2. Known direct job page patterns
+    # 2. Known direct job page patterns (including Indian job boards)
     direct_patterns = [
         "linkedin.com/jobs/view/",
         "indeed.com/viewjob",
         "indeed.com/rc/clk",
+        "in.indeed.com/viewjob",
+        "in.indeed.com/rc/clk",
         "weworkremotely.com/remote-jobs/",
         "glassdoor.com/job-listing",
         "glassdoor.co.in/job-listing",
         "wellfound.com/jobs/",
         "naukri.com/job-listings",
+        "instahyre.com/job/",
+        "foundit.in/job/",
+        "cutshort.io/jobs/",
         "upwork.com/jobs/",
         "lever.co",
         "greenhouse.io",
+        "boards.greenhouse.io",
+        "jobs.lever.co",
+        "careers.",
+        "jobs.",
         "/job/",
-        "/jobs/"
+        "/jobs/",
+        "/careers/"
     ]
     
     for pattern in direct_patterns:
@@ -191,18 +201,20 @@ def scout_node(state: AgentState):
             is_india_or_local = any(loc in location.lower() for loc in ["kochi", "bangalore", "mumbai", "delhi", "hyderabad", "chennai", "pune", "india"])
             loc_suffix = f"{location} India" if (is_india_or_local and "india" not in location.lower()) else location
             
-            # LinkedIn
-            search_queries.append(f'site:linkedin.com/jobs/view/ {term} {loc_suffix}')
-            # Indeed
-            search_queries.append(f'site:indeed.com/viewjob {term} {loc_suffix}')
+            # OPEN WEB QUERIES (highest priority — no site: restriction)
+            search_queries.append(f'{term} jobs {loc_suffix} 2025')
+            search_queries.append(f'{term} hiring {loc_suffix}')
         
-        # Remote search queries targeting India or globally
-        search_queries.append(f'site:linkedin.com/jobs/view/ {term} remote India')
-        search_queries.append(f'site:indeed.com/viewjob {term} remote India')
+        # Site-specific queries as supplementary sources
+        search_queries.append(f'site:linkedin.com/jobs/view/ {term} India')
+        search_queries.append(f'site:naukri.com {term}')
+        
+        # Remote search queries
+        search_queries.append(f'{term} remote jobs India 2025')
         search_queries.append(f'site:weworkremotely.com/remote-jobs/ {term}')
         
-    # Limit queries to 8 to avoid rate limits / API cost explosion
-    search_queries = list(dict.fromkeys(search_queries))[:8]
+    # Limit queries to 12 to balance coverage vs API cost
+    search_queries = list(dict.fromkeys(search_queries))[:12]
     
     # LLM-optimized extra query
     if llm and resume_summary:
@@ -236,22 +248,29 @@ Reply with ONLY the query string, nothing else. No quotes."""
             print(f"   ⚠️ Search failed for '{query}': {e}")
             continue
     
+    print(f"   🔍 Serper returned: {len(all_results)} total unique results")
+    
     # Filter Serper results to prioritize direct job description URLs
     direct_job_results = [r for r in all_results if is_direct_job_url(r.get('href', ''))]
     
-    if direct_job_results:
+    # Smart fallback: if the filter drops >70% of results, it's being too aggressive — skip it
+    if direct_job_results and len(direct_job_results) >= len(all_results) * 0.3:
         scraped_data = direct_job_results
-        print(f"   📊 Aggregated {len(scraped_data)} direct job listings (filtered down from {len(all_results)} total results)")
+        print(f"   📊 After URL filter: {len(scraped_data)} direct job listings (from {len(all_results)} total)")
     else:
         scraped_data = all_results
-        print(f"   ⚠️ No direct job URLs matched heuristics. Falling back to all {len(all_results)} search results.")
+        if direct_job_results:
+            print(f"   ⚠️ URL filter too aggressive ({len(direct_job_results)}/{len(all_results)} passed). Using all results.")
+        else:
+            print(f"   ⚠️ No direct job URLs matched heuristics. Using all {len(all_results)} results.")
 
     if len(scraped_data) == 0:
         print("⚠️ ScoutAgent: No results from Serper. Skipping LLM matching.")
+        print(f"   📊 DIAGNOSTIC: {len(search_queries)} queries executed, {len(all_results)} total results, 0 after filtering")
         return {"found_jobs": "NO STRICT MATCHES FOUND TODAY. The job search returned zero results. Please try again later.", "extracted_urls": []}
 
-    # Extract top 3 URLs for deep scraping via MCP Client
-    top_urls = [data.get('href') for data in scraped_data[:3] if data.get('href')]
+    # Extract top 5 URLs for deep scraping via MCP Client
+    top_urls = [data.get('href') for data in scraped_data[:5] if data.get('href')]
     
     print(f"🕵️  ScoutAgent: Booting MCP Browser Server to deep-read top {len(top_urls)} jobs...")
     try:
@@ -264,7 +283,7 @@ Reply with ONLY the query string, nothing else. No quotes."""
     # If deep scraping succeeded and returned high-signal text, use it.
     # Otherwise, fallback to the Serper Google snippet.
     final_job_data = []
-    for data in scraped_data[:3]:
+    for data in scraped_data[:8]:
         url = data.get('href')
         # Check if we have deep-scraped text for this URL
         deep_match = next((item for item in deep_scraped if item['url'] == url), None)
@@ -287,13 +306,15 @@ Reply with ONLY the query string, nothing else. No quotes."""
             if deep_match:
                 print(f"   ⚠️ Scraped text for {url} looks like a login wall or captcha. Falling back to Serper Google snippet.")
             else:
-                print(f"   ⚠️ Falling back to Serper Google snippet for: {url}")
+                print(f"   ℹ️ Using Serper snippet for: {url}")
+    
+    print(f"   📊 Sending {len(final_job_data)} candidates to LLM for matching")
 
     scraped_text = json.dumps(final_job_data, indent=2)
 
-    print("🕵️  ScoutAgent: Matching Serper Google results against Resume + Preferences...")
+    print("🕵️  ScoutAgent: Matching search results against Resume + Preferences...")
     prompt = f"""
-    You are a RUTHLESS, highly critical AI Job Matcher. DO NOT HALLUCINATE OR BE LENIENT.
+    You are a precise AI Job Matcher. Your job is to find the BEST matches between a user's profile and live job results.
     
     USER PROFILE: 
     {resume_summary}
@@ -302,29 +323,36 @@ Reply with ONLY the query string, nothing else. No quotes."""
     - Preferred Job Role: {preferred_job}
     - Preferred Locations: {locations}
     
-    LIVE GOOGLE SEARCH JOB RESULTS:
-    {scraped_text[:8000]}
+    LIVE SEARCH JOB RESULTS:
+    {scraped_text[:12000]}
     
     Previously Sent Jobs (DO NOT suggest these URLs again):
     {state.get('previously_sent_jobs', [])}
     
-    Task: Find the top 1 to 5 jobs that are a PERFECT, STRICT MATCH for this user's resume AND preferences.
+    Task: Find the top 1 to 5 jobs that are the BEST MATCH for this user.
     
-    YOUR STRICT EVALUATION RULES:
-    1. JOB ROLE MATCH: The job title/description must closely match "{preferred_job}". Unrelated roles must be instantly rejected.
-    2. LOCATION MATCH: The job must be in one of these locations: {locations}, or be a remote position.
-    3. CRITICAL EXPERIENCE MATCH: The User's experience level MUST strictly match or exceed the job's minimum experience requirements. If the job requires more experience than the User currently possesses, you MUST instantly reject it. ZERO EXCEPTIONS. Do not ignore experience mismatch even if their skills align perfectly.
-    4. EDUCATION MATCH: If the job requires a specific Degree and the User's profile does not state they have it, reject it.
-    5. SKILL MATCH: The User MUST possess the core mandatory technical skills required by the job description.
+    EVALUATION CRITERIA (score each job out of 5):
+    1. JOB ROLE MATCH: The job title/description should be related to "{preferred_job}" or closely adjacent fields. Adjacent roles (e.g., ML Engineer for an AI Engineer candidate) are acceptable.
+    2. LOCATION MATCH: The job should be in one of these locations: {locations}, or be a remote position. If location is unclear from the snippet, still include the job.
+    3. EXPERIENCE MATCH: The user's experience level should reasonably fit the job requirements. For junior/fresher candidates, jobs requiring 0-2 years experience ARE valid matches. If the snippet does not specify experience requirements, do NOT reject the job.
+    4. EDUCATION MATCH: Only reject if the job explicitly requires a degree the user clearly lacks.
+    5. SKILL MATCH: The user should possess most of the core technical skills mentioned in the job description.
     
-    If NO jobs pass ALL 5 rules, you MUST simply reply: "NO STRICT MATCHES FOUND TODAY."
+    SCORING:
+    - Jobs passing 4-5 criteria = STRONG MATCH (include these)
+    - Jobs passing 3 criteria = POSSIBLE MATCH (include these if fewer than 3 strong matches exist)
+    - Jobs passing 0-2 criteria = REJECT
+    
+    IMPORTANT: When the search snippet is short (Serper snippet), be GENEROUS with your evaluation. A snippet saying "AI Engineer - Bangalore" with no other details should be treated as a possible match if role and location fit.
+    
+    If NO jobs pass at least 3 criteria, reply with EXACTLY: "NO STRICT MATCHES FOUND TODAY."
     
     CRITICAL URL RULE: You MUST copy the EXACT 'href' URL from the JSON data. DO NOT modify, shorten, or fabricate any URL!
     
-    If you find perfect matches, format them EXACTLY like this:
+    Format matches EXACTLY like this:
     1. [Job Title] at [Company] — [Location]
-       Match Score: [e.g., 95%]
-       Why it's a match: [Explain how their skills, experience, and location preference align]
+       Match Score: [e.g., 85%]
+       Why it's a match: [Brief explanation of how their skills, experience, and location align]
        Apply Here: [EXACT 'href' URL from the JSON data]
     """
     
