@@ -14,7 +14,7 @@ def serper_search(query, num_results=10):
     """
     Uses Serper.dev to get real Google search results seamlessly.
     """
-    api_key = os.getenv("SERPER_API_KEY")
+    api_key = os.getenv("SERPER_API_KEY", "").strip()
     if not api_key:
         print("⚠️ Serper credentials missing in .env!")
         return []

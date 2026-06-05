@@ -15,8 +15,8 @@ def alert_node(state: AgentState):
 
     # Email Notification
     try:
-        sender = os.getenv("EMAIL_SENDER")
-        api_key = os.getenv("SENDGRID_API_KEY")
+        sender = os.getenv("EMAIL_SENDER", "").strip()
+        api_key = os.getenv("SENDGRID_API_KEY", "").strip()
         target_email = state.get("email_address", sender).strip()
         
         if sender and api_key:

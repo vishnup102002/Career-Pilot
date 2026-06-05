@@ -103,7 +103,7 @@ async def debug_pipeline():
         import json as json_lib
         conn = http.client.HTTPSConnection("google.serper.dev")
         payload = json_lib.dumps({"q": "AI Engineer jobs India", "num": 3, "gl": "in", "hl": "en"})
-        headers = {'X-API-KEY': os.getenv("SERPER_API_KEY", ""), 'Content-Type': 'application/json'}
+        headers = {'X-API-KEY': os.getenv("SERPER_API_KEY", "").strip(), 'Content-Type': 'application/json'}
         conn.request("POST", "/search", payload, headers)
         res = conn.getresponse()
         raw_data = res.read().decode("utf-8")
