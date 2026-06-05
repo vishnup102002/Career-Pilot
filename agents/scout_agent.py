@@ -164,25 +164,45 @@ def scout_node(state: AgentState):
     # Build smart search queries using the user's preferred job + locations
     location_list = [loc.strip() for loc in locations.split(',') if loc.strip()]
     
+    # Generate search variations to avoid niche title bottleneck
+    clean_job = preferred_job.replace("Junior", "").replace("junior", "").replace("Senior", "").replace("senior", "").replace("Lead", "").replace("lead", "").strip()
+    
+    # Base search terms
+    search_terms = [preferred_job, clean_job]
+    
+    # Expand to broader terms based on keyword matching
+    lowercase_job = preferred_job.lower()
+    if "generative ai" in lowercase_job or "genai" in lowercase_job or "ai" in lowercase_job:
+        search_terms.extend(["AI Engineer", "Generative AI Engineer", "Python Developer", "Machine Learning Engineer"])
+    elif "data" in lowercase_job:
+        search_terms.extend(["Data Scientist", "Data Analyst", "Machine Learning Engineer"])
+    elif "devops" in lowercase_job or "cloud" in lowercase_job:
+        search_terms.extend(["DevOps Engineer", "Cloud Engineer", "Site Reliability Engineer"])
+    elif "full stack" in lowercase_job or "software" in lowercase_job or "developer" in lowercase_job or "engineer" in lowercase_job:
+        search_terms.extend(["Software Engineer", "Python Developer", "Full Stack Developer"])
+        
+    # Remove duplicates and empty items
+    search_terms = list(dict.fromkeys([term.strip() for term in search_terms if term.strip()]))
+    
     search_queries = []
-    
-    # 1. Target LinkedIn direct views
-    for location in location_list:
-        search_queries.append(f'site:linkedin.com/jobs/view/ "{preferred_job}" {location}')
-    search_queries.append(f'site:linkedin.com/jobs/view/ "{preferred_job}" remote')
-    
-    # 2. Target Indeed direct views
-    for location in location_list:
-        search_queries.append(f'site:indeed.com/viewjob "{preferred_job}" {location}')
-    search_queries.append(f'site:indeed.com/viewjob "{preferred_job}" remote')
-    
-    # 3. Target other known platforms direct URLs
-    search_queries.append(f'site:weworkremotely.com/remote-jobs/ "{preferred_job}"')
-    
-    # 4. Fallback generic queries
-    for location in location_list:
-        search_queries.append(f'"{preferred_job}" jobs {location} apply')
-    search_queries.append(f'"{preferred_job}" jobs remote apply 2025 2026')
+    for term in search_terms[:3]: # Limit to top 3 search terms to prevent query explosion
+        for location in location_list:
+            # Check if the location is in India or remote to target local/remote India job postings
+            is_india_or_local = any(loc in location.lower() for loc in ["kochi", "bangalore", "mumbai", "delhi", "hyderabad", "chennai", "pune", "india"])
+            loc_suffix = f"{location} India" if (is_india_or_local and "india" not in location.lower()) else location
+            
+            # LinkedIn
+            search_queries.append(f'site:linkedin.com/jobs/view/ {term} {loc_suffix}')
+            # Indeed
+            search_queries.append(f'site:indeed.com/viewjob {term} {loc_suffix}')
+        
+        # Remote search queries targeting India or globally
+        search_queries.append(f'site:linkedin.com/jobs/view/ {term} remote India')
+        search_queries.append(f'site:indeed.com/viewjob {term} remote India')
+        search_queries.append(f'site:weworkremotely.com/remote-jobs/ {term}')
+        
+    # Limit queries to 8 to avoid rate limits / API cost explosion
+    search_queries = list(dict.fromkeys(search_queries))[:8]
     
     # LLM-optimized extra query
     if llm and resume_summary:
