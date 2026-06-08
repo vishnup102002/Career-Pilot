@@ -6,6 +6,7 @@ venv/
 db/*.db
 db/*.pdf
 db/resume_chroma/
+data/
 
 # Python cache
 __pycache__/

@@ -6,60 +6,148 @@ colorTo: green
 sdk: docker
 pinned: false
 ---
-This is a high-signal project for your 2026 portfolio. It demonstrates that you understand Model Context Protocol (MCP), Stateful Agents (LangGraph), and the ethical balance of Human-in-the-Loop AI.
-Below is a professional README.md designed to impress a CTO at a company like Alchemyst AI. It positions you not as a "spammer," but as an AI Orchestrator.
 
-Career-Pilot: MCP-Driven Agentic Job Intelligence
-Career-Pilot is an agentic ecosystem designed to solve the "Context Gap" in technical job hunting. Instead of blind automation, it uses the Model Context Protocol (MCP) to orchestrate deep research, resume alignment, and human-in-the-loop application drafting across platforms like Wellfound, LinkedIn, and Instahyre.
-核心 (Core) Philosophy
-In the 2026 recruitment landscape, "Auto-Appliers" are filtered out. Career-Pilot focuses on High-Intent Alignment:
-1. Discover: Scouts roles matching specific tech stacks (e.g., Python, RAG, LangGraph).
-2. Research: Scrapes company engineering blogs and recent news via MCP.
-3. Draft: Generates hyper-personalized "Why us?" responses based on technical synergy.
-4. Human-Check: Pings the user via WhatsApp/Slack for a final review before submission.
+# Career-Pilot: Autonomous MCP & LangGraph Driven Job Intelligence Engine
 
-🛠 Tech Stack
-* Orchestration: LangGraph (Stateful Multi-Agent Workflows)
-* Protocol: Model Context Protocol (MCP)
-* Agents: * ScoutAgent: Playwright-based browser MCP for live job scraping.
-    * ResearchAgent: Specialized MCP server for analyzing GitHub repos and Tech Blogs.
-    * WriterAgent: LLM-driven (Claude 3.5/GPT-4o) alignment engine.
-* Database: SQLite (Job tracking) & ChromaDB (Vectorized Resume/Experience)
-* Human-in-the-Loop: WhatsApp/Telegram API for approval triggers.
+[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space-blue)](https://huggingface.co/spaces/Vishnuporkulath/career-pilot)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-green.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-🚀 Key Features & MCP Servers
-1. The Browser-MCP Server
-Provides a standardized interface for the agent to navigate modern SPAs (Single Page Applications) like Wellfound without triggering bot-detection.
-* Tools: Maps_to_job, extract_requirements, detect_application_fields.
-2. The Context-Research MCP
-A dedicated server that takes a company URL and returns a "Technical DNA" report.
-* Tools: fetch_engineering_stack, summarize_recent_funding, match_resume_to_role.
-3. The Approval Loop (HITL)
-Prevents "Bot-Banning" by requiring a manual signature. The agent sends a JSON payload to the user:
-"Vishnu, I found a GenAI lead role at Teal India. They use Llama-Index (which you used in Project X). Here is the drafted response. [Approve / Edit / Skip]"
+**Career-Pilot** is an agentic, stateful ecosystem built on [LangGraph](https://github.com/langchain-ai/langgraph) and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) to bridge the "Context Gap" in technical job hunting. Instead of sending low-quality bulk applications, Career-Pilot focuses on **High-Intent Alignment**: discovering targeted technical roles, performing deep semantic matching against a candidate's resume, drafting personalized job listings, and alerting the candidate directly via email with precise application targets.
 
-📦 Installation & Setup
-1. Clone the Project: Bash  git clone https://github.com/your-username/career-pilot-mcp.git
-2. cd career-pilot-mcp
-3.    
-4. Install Dependencies: Bash  pip install mcp langgraph playwright
-5. playwright install chromium
-6.    
-7. Configure MCP Servers: Add your server configurations to your local MCP settings file (e.g., claude_desktop_config.json).
-8. Initialize the Agent: Python  python main.py --focus "AI Engineer" --location "Remote, Bengaluru"
-9.    
+The live application is hosted on Hugging Face Spaces: [Career-Pilot Live App](https://huggingface.co/spaces/Vishnuporkulath/career-pilot).
 
-🛡 Ethical Considerations & Anti-Bot Strategy
-* No Headless Spam: The system operates with randomized delays and human-like scrolling.
-* Privacy First: Resume data is stored locally; only job-specific metadata is sent to the LLM for drafting.
-* Quality > Quantity: Optimized to find the top 5 daily matches rather than 100 random ones.
+---
 
-📈 Future Roadmap
-* [ ] Interview Simulator: Use the ResearchAgent to generate 10 mock interview questions based on the company's specific tech stack.
-* [ ] Salary Intelligence: Integrate real-time market data to suggest optimal salary ranges during the application phase.
+## 🗺️ System Architecture & Workflow
 
-How to explain this in your next interview:
-"I built Career-Pilot because I saw a flaw in how AI was being used for job hunting. Most tools just spam; I wanted to build an Intelligence Agent. I used MCP to give the LLM 'eyes' into company culture and 'hands' to navigate complex job boards. It’s a study in stateful orchestration (LangGraph) and building AI that works with humans, not instead of them."
+Career-Pilot orchestrates four distinct specialized agents within a stateful, cyclic workflow built on LangGraph. Here is the operational state graph:
 
-Next Step for you: Create a new GitHub repo with this README. Then, start by building the first MCP Tool that can read a Wellfound job description and return a list of "Must-Have" vs "Nice-to-Have" skills.
-Want the Python boilerplate for that first "Scout" MCP tool?
+```mermaid
+graph TD
+    Start((Start Onboarding / Daily Cron)) --> ResearchNode["📚 ResearchAgent<br/>(Analyze Resume & Ideal Role)"]
+    ResearchNode --> ScoutNode["🕵️ ScoutAgent<br/>(Optimized Job Hunting Searches)"]
+    ScoutNode --> MatchEngine["🧠 LLM Scoring Engine<br/>(Generous Profile Matching)"]
+    MatchEngine --> WriterNode["✍️ WriterAgent<br/>(Format Personalized Email List)"]
+    WriterNode --> AlertNode["🚨 AlertAgent<br/>(SendGrid Email & SQLite Dedup)"]
+    AlertNode --> End((End Workflow))
+    
+    subgraph State Management [LangGraph TypedDict State]
+        direction LR
+        StateVar["• user_id<br/>• resume_summary<br/>• preferred_job<br/>• found_jobs<br/>• drafted_response<br/>• extracted_urls"]
+    end
+```
+
+---
+
+## 🛠️ Tech Stack & Key Files
+
+### Core Technologies
+* **Stateful Orchestration**: LangGraph (Dynamic multi-agent node transition and memory preservation).
+* **Protocol Standard**: Model Context Protocol (MCP) using `fastmcp` to interface tool-calling agents with browser runtimes.
+* **LLM Backends**: Dual client support for Google Gemini (`gemini-2.0-flash`) and Groq (`llama-3.1-8b-instant`) for speed and reliability.
+* **Database Layer**: Native SQLite database (`data/career_pilot.db`) to track user metadata and deduplicate previously sent listings.
+* **Web UI**: Modern responsive Glassmorphic dashboard built using FastAPI, HTML5, Vanilla CSS, and custom async JS.
+
+### Workspace Directory Structure
+* [main.py](file:///Users/vishnup/Desktop/Career-Pilot/main.py): The primary LangGraph compiler defining the state graph and sequential execution edges.
+* [api.py](file:///Users/vishnup/Desktop/Career-Pilot/api.py): FastAPI web router hosting the onboarding API endpoint, static views, and the universal `APScheduler` daily cron job.
+* [agents/](file:///Users/vishnup/Desktop/Career-Pilot/agents):
+  * [state.py](file:///Users/vishnup/Desktop/Career-Pilot/agents/state.py): Defines the state dictionary ([AgentState](file:///Users/vishnup/Desktop/Career-Pilot/agents/state.py#L3)) containing user parameters, scraped jobs, and output emails.
+  * [config.py](file:///Users/vishnup/Desktop/Career-Pilot/agents/config.py): Bootstraps LLM clients with dynamic switchovers based on API quotas.
+  * [research_agent.py](file:///Users/vishnup/Desktop/Career-Pilot/agents/research_agent.py): Holds the [research_node](file:///Users/vishnup/Desktop/Career-Pilot/agents/research_agent.py#L7) which extracts technical credentials from uploaded resumes.
+  * [scout_agent.py](file:///Users/vishnup/Desktop/Career-Pilot/agents/scout_agent.py): Holds the [scout_node](file:///Users/vishnup/Desktop/Career-Pilot/agents/scout_agent.py#L198) managing Google Serper.dev searches, filtering, and LLM matching.
+  * [writer_agent.py](file:///Users/vishnup/Desktop/Career-Pilot/agents/writer_agent.py): Holds the [writer_node](file:///Users/vishnup/Desktop/Career-Pilot/agents/writer_agent.py#L5) structuring job match details into a personalized pitch.
+  * [alert_agent.py](file:///Users/vishnup/Desktop/Career-Pilot/agents/alert_agent.py): Holds the [alert_node](file:///Users/vishnup/Desktop/Career-Pilot/agents/alert_agent.py#L6) sending email reports via SendGrid and logging target URLs to SQLite.
+* [mcp_servers/](file:///Users/vishnup/Desktop/Career-Pilot/mcp_servers):
+  * [browser_mcp.py](file:///Users/vishnup/Desktop/Career-Pilot/mcp_servers/browser_mcp.py): A custom FastMCP server running Playwright under the hood to perform deep client-side scraping for single-page applications (SPAs).
+* [db/](file:///Users/vishnup/Desktop/Career-Pilot/db):
+  * [database.py](file:///Users/vishnup/Desktop/Career-Pilot/db/database.py): Manages SQL schema setups ([init_db](file:///Users/vishnup/Desktop/Career-Pilot/db/database.py#L6)), new user insertions, preferred job logs, and duplicate exclusions.
+
+---
+
+## 🤖 Dynamic Agent Pipeline
+
+### 1. The Research Agent
+Reads the user's raw uploaded resume to run structured parsing. It generates a standardized technical DNA report highlighting core stacks (e.g., Python, RAG, Kubernetes), years of experience, and location constraints. It also infers the single best-fitting role (e.g. *Junior AI Engineer*, *Staff Frontend Developer*).
+
+### 2. The Scout Agent & Custom Browser MCP
+Flashes out multi-variant search queries matching the candidate's profile to retrieve organic listings across LinkedIn, Indeed, Naukri, and WeWorkRemotely.
+* **Direct Job URL Filter**: Uses advanced heuristics to reject generalized indexing pages, aggregators, or search queries, focusing strictly on target-rich job application links.
+* **FastMCP Integration**: Connects to the local [browser_mcp.py](file:///Users/vishnup/Desktop/Career-Pilot/mcp_servers/browser_mcp.py) running headless Playwright. It bypasses classic SPA rendering traps to extract inner page layout text.
+* **LLM Score Matcher**: Scores jobs out of 5 across role titles, location restrictions, required experience levels, education constraints, and skill overlaps. It returns listings with scoring >= 3/5.
+
+### 3. The Writer Agent
+Refines the matches, mapping their technical relevance directly to the candidate's resume history. It tags jobs with source platform markers (📍 via LinkedIn, 📍 via Indeed) and constructs a high-impact, short, bulleted catalog.
+
+### 4. The Alert & Deduplication Agent
+* **SendGrid Deliverability**: Pushes the formatted listing catalog straight to the candidate's email address.
+* **SQLite Memory Lock**: Ensures that the same job is never suggested twice. Every dispatched URL is permanently indexed to prevent spamming.
+
+---
+
+## 📦 Local Setup & Deployment
+
+### Prerequisites
+* Python 3.11+
+* Node.js (for custom MCP integrations)
+* Playwright browsers
+
+### 1. Clone & Set Up Directory
+```bash
+git clone https://github.com/Vishnuporkulath/Career-Pilot.git
+cd Career-Pilot
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium --with-deps
+```
+
+### 2. Configure Environment Variables
+Create a `.env` file in the root directory:
+```ini
+# Central LLM Configurations
+GOOGLE_API_KEY=your_gemini_api_key_here
+GROQ_API_KEY=your_groq_api_key_here
+USE_GEMINI=true   # Set to true to prioritize Gemini over Groq
+
+# Search Engine Configuration
+SERPER_API_KEY=your_serper_dev_api_key_here
+
+# Delivery Config
+SENDGRID_API_KEY=your_sendgrid_api_key_here
+EMAIL_SENDER=sender_verified_email@domain.com
+```
+
+### 3. Initialize SQLite Schema
+```bash
+python db/database.py
+```
+
+### 4. Start the Application
+Run the FastAPI application locally:
+```bash
+python api.py
+```
+Open your browser to `http://127.0.0.1:8000` to access the onboarding page.
+
+---
+
+## 🌎 Deploying to Hugging Face Spaces (Docker SDK)
+
+To build and deploy your own instance of Career-Pilot on Hugging Face Spaces:
+1. Make sure your Space settings are configured to use the **Docker** SDK.
+2. The custom [Dockerfile](file:///Users/vishnup/Desktop/Career-Pilot/Dockerfile) handles python-3.11 environment setup, installs OS dependencies for Chromium, downloads Playwright runtimes, and launches Uvicorn on port `7860`.
+3. Add the environment secrets (`GOOGLE_API_KEY`, `SERPER_API_KEY`, `SENDGRID_API_KEY`, etc.) inside the Space settings console.
+
+---
+
+## 📈 Future Roadmap
+- [ ] **Interactive Mock Interviews**: Generate tailored mock technical questions based on the candidate's exact target roles.
+- [ ] **Salary Intelligence**: Integrate real-time market data to recommend optimum salary rates during target job selection.
+- [ ] **Cross-Platform HITL approvals**: Support WhatsApp/Telegram callbacks to approve and edit drafts directly from standard chat applications.
+
+---
+
+## 🎙️ How to Pitch This Project in an Interview
+> *"I built Career-Pilot to solve the low-conversion trap of modern automated job hunting. Instead of mindless resume-blasting, I created a stateful agentic system using LangGraph and the Model Context Protocol (MCP) that performs hyper-personalized alignment. It handles custom resume profile extraction, filters out generic web aggregators in favor of direct application pages, performs detailed technical match-scoring, and delivers daily tailored reports via SendGrid. It is a study in bridging LLMs with stateful system workflows, database logging, and secure client-side browser orchestration."*
