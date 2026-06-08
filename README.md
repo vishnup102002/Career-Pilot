@@ -13,7 +13,7 @@ pinned: false
 
 Career-Pilot is an agentic, stateful ecosystem built on **LangGraph** and the **Model Context Protocol (MCP)** to bridge the "Context Gap" in technical job hunting. Instead of sending low-quality bulk applications, Career-Pilot focuses on **High-Intent Alignment**: discovering targeted technical roles, performing deep semantic matching against a candidate's resume, drafting personalized job listings, and alerting the candidate directly via email with precise application targets.
 
-The live application is hosted on Hugging Face Spaces: [[Career-Pilot Live App](https://huggingface.co/spaces/Vishnuporkulath/career-pilot)
+The live application is hosted on Hugging Face Spaces: [[Career-Pilot Live App](https://huggingface.co/spaces/Vishnuporkulath/career-pilot)]
 ---
 
 ## 🗺️ System Architecture & Workflow
