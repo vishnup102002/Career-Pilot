@@ -1,6 +1,4 @@
----
-title: Career Pilot
----
+
 
 # Career-Pilot: Autonomous MCP & LangGraph Driven Job Intelligence Engine
 
