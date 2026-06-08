@@ -9,11 +9,11 @@ pinned: false
 
 # Career-Pilot: Autonomous MCP & LangGraph Driven Job Intelligence Engine
 
-[![Hugging Face Space](https://img.shields.io/badge/🤗-Live%20App-blue)](https://huggingface.co/spaces) [![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hugging Face Space](https://img.shields.io/badge/🤗-Live%20App-blue)]((https://huggingface.co/spaces/Vishnuporkulath/career-pilot)) [![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Career-Pilot is an agentic, stateful ecosystem built on **LangGraph** and the **Model Context Protocol (MCP)** to bridge the "Context Gap" in technical job hunting. Instead of sending low-quality bulk applications, Career-Pilot focuses on **High-Intent Alignment**: discovering targeted technical roles, performing deep semantic matching against a candidate's resume, drafting personalized job listings, and alerting the candidate directly via email with precise application targets.
 
-The live application is hosted on Hugging Face Spaces: [Career-Pilot Live App](https://huggingface.co/spaces).
+The live application is hosted on Hugging Face Spaces: [[Career-Pilot Live App](https://huggingface.co/spaces](https://huggingface.co/spaces/Vishnuporkulath/career-pilot)).
 
 ---
 
