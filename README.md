@@ -95,7 +95,7 @@ Refines the matches, mapping their technical relevance directly to the candidate
 
 ### 1. Clone & Set Up Directory
 ```bash
-git clone https://github.com/Vishnuporkulath/Career-Pilot.git
+git clone (https://github.com/vishnup102002/Career-Pilot.git)
 cd Career-Pilot
 python -m venv venv
 source venv/bin/activate
