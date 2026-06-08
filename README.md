@@ -1,10 +1,5 @@
 ---
 title: Career Pilot
-emoji: 🚀
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: true
 ---
 
 # Career-Pilot: Autonomous MCP & LangGraph Driven Job Intelligence Engine
