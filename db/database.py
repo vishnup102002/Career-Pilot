@@ -1,12 +1,27 @@
 import sqlite3
 import os
 
-DB_PATH = "data/career_pilot.db"
+def get_data_dir():
+    # Try local 'data' directory first
+    local_dir = os.path.abspath("data")
+    try:
+        os.makedirs(local_dir, exist_ok=True)
+        # Test write permission
+        test_file = os.path.join(local_dir, ".test")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        return local_dir
+    except (PermissionError, OSError):
+        # Fallback to /tmp/data for read-only environments like HF Spaces
+        tmp_dir = "/tmp/data"
+        os.makedirs(tmp_dir, exist_ok=True)
+        return tmp_dir
+
+DATA_DIR = get_data_dir()
+DB_PATH = os.path.join(DATA_DIR, "career_pilot.db")
 
 def init_db():
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     

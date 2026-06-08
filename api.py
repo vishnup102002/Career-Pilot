@@ -6,7 +6,7 @@ import PyPDF2
 import os
 
 from main import career_pilot_graph
-from db.database import init_db, insert_user, get_sent_jobs, get_all_users
+from db.database import init_db, insert_user, get_sent_jobs, get_all_users, DATA_DIR
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 
@@ -215,10 +215,7 @@ async def initialize_pipeline(
     email: str = Form(...),
     locations: str = Form(...)
 ):
-    if not os.path.exists("data"):
-        os.makedirs("data")
-        
-    file_location = f"data/{resume.filename}"
+    file_location = os.path.join(DATA_DIR, resume.filename)
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(resume.file, buffer)
         
