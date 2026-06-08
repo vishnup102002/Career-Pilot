@@ -149,5 +149,3 @@ To build and deploy your own instance of Career-Pilot on Hugging Face Spaces:
 
 ---
 
-## 🎙️ How to Pitch This Project in an Interview
-> *"I built Career-Pilot to solve the low-conversion trap of modern automated job hunting. Instead of mindless resume-blasting, I created a stateful agentic system using LangGraph and the Model Context Protocol (MCP) that performs hyper-personalized alignment. It handles custom resume profile extraction, filters out generic web aggregators in favor of direct application pages, performs detailed technical match-scoring, and delivers daily tailored reports via SendGrid. It is a study in bridging LLMs with stateful system workflows, database logging, and secure client-side browser orchestration."*
