@@ -4,7 +4,7 @@ emoji: 🚀
 colorFrom: blue
 colorTo: green
 sdk: docker
-pinned: false
+pinned: true
 ---
 
 # Career-Pilot: Autonomous MCP & LangGraph Driven Job Intelligence Engine
