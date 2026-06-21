@@ -1,0 +1,69 @@
+[
+  {
+    "scenario_id": 1,
+    "scenario_name": "Fresher AI Engineer in Kochi/Remote",
+    "profile": {
+      "resume_summary": "Recent B.Tech graduate in Computer Science. Core skills include Python, LangChain, Hugging Face, PyTorch, and SQL. Completed academic projects building RAG pipelines and fine-tuning small LLMs. No professional experience (fresher), looking for entry-level positions.",
+      "preferred_job": "Junior AI Engineer",
+      "locations": "Kochi, Bangalore, Remote"
+    },
+    "jobs_to_test": [
+      {
+        "job_id": "job_1_1",
+        "title": "Junior AI Developer (Remote)",
+        "company": "CognitiveLabs",
+        "location": "Remote",
+        "href": "https://linkedin.com/jobs/view/1111111",
+        "snippet": "We are looking for a Junior AI Developer who is passionate about GenAI and LLMs. Skills: Python, LangChain, API integrations. Experience: 0-2 years. Fresher graduates are welcome.",
+        "expected_match": "STRONG MATCH"
+      },
+      {
+        "job_id": "job_1_2",
+        "title": "Lead Machine Learning Engineer",
+        "company": "GlobalAI",
+        "location": "Bangalore",
+        "href": "https://linkedin.com/jobs/view/2222222",
+        "snippet": "Seeking a Lead ML Engineer to design large-scale recommendation systems. Must have a PhD in CS/Math and 8+ years of production experience with PyTorch and Kubernetes.",
+        "expected_match": "REJECT"
+      },
+      {
+        "job_id": "job_1_3",
+        "title": "PHP Web Developer",
+        "company": "LocalWebs",
+        "location": "Kochi",
+        "href": "https://linkedin.com/jobs/view/3333333",
+        "snippet": "Hiring a PHP Web Developer to maintain local WordPress e-commerce websites. Requires PHP, HTML, CSS, WordPress. 1+ year experience required.",
+        "expected_match": "REJECT"
+      }
+    ]
+  },
+  {
+    "scenario_id": 2,
+    "scenario_name": "Mid-Level Frontend Developer in Mumbai",
+    "profile": {
+      "resume_summary": "Software Engineer with 3 years of experience specializing in frontend web development. Expert in React.js, TypeScript, Next.js, HTML5, CSS3, and Tailwind CSS. Experienced in building responsive web dashboards and optimizing page speed.",
+      "preferred_job": "Frontend Developer",
+      "locations": "Mumbai, Remote"
+    },
+    "jobs_to_test": [
+      {
+        "job_id": "job_2_1",
+        "title": "React.js Frontend Engineer",
+        "company": "FintechCorp",
+        "location": "Mumbai",
+        "href": "https://linkedin.com/jobs/view/4444444",
+        "snippet": "FintechCorp is hiring a Frontend Developer. Required skills: React, TypeScript, Next.js, CSS. Experience: 2-4 years. Location: Mumbai office (hybrid).",
+        "expected_match": "STRONG MATCH"
+      },
+      {
+        "job_id": "job_2_2",
+        "title": "Python DevOps Engineer",
+        "company": "CloudSystems",
+        "location": "Remote",
+        "href": "https://linkedin.com/jobs/view/5555555",
+        "snippet": "Looking for a DevOps Engineer to manage CI/CD pipelines, Docker, Kubernetes, AWS, and write Python automation scripts. 3+ years experience.",
+        "expected_match": "REJECT"
+      }
+    ]
+  }
+]

@@ -1,0 +1,34 @@
+name: Hugging Face Space Keep-Alive
+
+on:
+  schedule:
+    # Run every 6 hours to prevent sleeping (HF space timeout is typically 48 hours, but can be less)
+    - cron: '0 */6 * * *'
+    # Also trigger specifically at 03:15 UTC (08:45 AM IST) to wake it up before the 9:00 AM IST daily hunt
+    - cron: '15 3 * * *'
+  workflow_dispatch:
+    # Allows manual triggering of the workflow from GitHub Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install requests python-dotenv
+
+      - name: Run Keep-Alive Ping
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          # If APP_URL secret is not set, the script defaults to the default HF Space URL
+          python keep_alive.py

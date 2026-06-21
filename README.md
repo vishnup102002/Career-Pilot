@@ -198,6 +198,60 @@ Open your browser to `http://127.0.0.1:8000` to access the onboarding page.
 
 ---
 
+---
+
+## 📡 Hugging Face Space Keep-Alive Utility
+
+Since free Hugging Face Spaces go to sleep automatically after periods of inactivity (which pauses all internal schedulers/cron jobs), we provide a dedicated utility to keep the Space active or wake it up before the daily search cron triggers at 9:00 AM IST.
+
+### Local Daemon Mode
+You can run the keep-alive script locally as a daemon in the background:
+```bash
+# Ping the space every 30 minutes to prevent it from sleeping
+python keep_alive.py --url https://your-space-name.hf.space --daemon --interval 30
+
+# Alternatively, schedule it to run once every morning at 08:45 AM IST (to wake up the space for the 9:00 AM cron)
+python keep_alive.py --url https://your-space-name.hf.space --daemon --morning-only
+```
+
+### GitHub Actions Workflow (Serverless / Recommended)
+We have configured a GitHub Actions workflow in `.github/workflows/keep_alive.yml`. This workflow runs:
+1. Every 6 hours to prevent the Hugging Face Space from entering deep sleep.
+2. Specifically at 03:15 UTC (08:45 AM IST) to wake the Space up right before the morning cron triggers.
+
+**Setup**:
+1. Push this repository to GitHub.
+2. Add your space direct URL (e.g. `https://vishnuporkulath-career-pilot.hf.space`) as a GitHub Repository Secret named `APP_URL`.
+
+---
+
+## 🛠️ Tracing & Evaluation Harness
+
+### 1. LangSmith Integration (Automatic Agent Tracing)
+Since `langsmith` is included in our `requirements.txt` and Career-Pilot uses standard LangChain/LangGraph model components, you can enable comprehensive state graph tracing simply by adding the following to your `.env` file:
+```ini
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_ENDPOINT="https://api.smith.langchain.com"
+LANGCHAIN_API_KEY="your-langsmith-api-key-here"
+LANGCHAIN_PROJECT="career-pilot"
+```
+
+### 2. LLM-as-a-Judge Evaluation Suite
+We have implemented a custom benchmark evaluation harness located under the `evaluation/` directory. It uses mock candidate scenarios and job postings to evaluate the scout matching agent's performance.
+
+To run the evaluation:
+```bash
+python evaluation/eval_harness.py
+```
+
+The script will:
+- Run the agent's matching algorithm on scenarios in `evaluation/test_cases.json`.
+- Compute performance metrics: **Accuracy, Precision, Recall, and F1-Score**.
+- Run an independent **LLM-as-a-Judge** to evaluate the factual correctness and quality of the agent's matching reasoning (scored 1-5).
+- Print a diagnostic summary and save a markdown report to `evaluation/eval_report.md`.
+
+---
+
 ## 📈 Future Roadmap
 
 - [ ] **Interactive Mock Interviews** — Generate tailored technical questions based on the candidate's exact target roles.
@@ -209,3 +263,4 @@ Open your browser to `http://127.0.0.1:8000` to access the onboarding page.
 ## 📜 License
 
 Licensed under the [MIT License](LICENSE). Created by **Vishnu P**.
+
