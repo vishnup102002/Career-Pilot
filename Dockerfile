@@ -1,4 +1,5 @@
 FROM python:3.11-bullseye
+ENV PYTHONUNBUFFERED=1
 WORKDIR /code
 
 COPY ./requirements.txt /code/requirements.txt
