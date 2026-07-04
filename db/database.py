@@ -2,21 +2,63 @@ import sqlite3
 import os
 
 def get_data_dir():
-    # Try local 'data' directory first
+    """
+    Determine the best writable data directory.
+    Priority:
+    1. HF_BUCKET_PATH env var (if user specifies a custom mount path)
+    2. HF Storage Bucket mounted under /data (auto-detected)
+    3. /data persistent storage (HF Spaces legacy)
+    4. ./data (local development)
+    5. /tmp/data (ephemeral fallback)
+    """
+    def _test_writable(path):
+        """Test if a directory is writable."""
+        try:
+            os.makedirs(path, exist_ok=True)
+            test_file = os.path.join(path, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("ok")
+            os.remove(test_file)
+            return True
+        except (PermissionError, OSError):
+            return False
+
+    # 1. Explicit bucket path from env var
+    bucket_path = os.getenv("HF_BUCKET_PATH", "").strip()
+    if bucket_path and _test_writable(bucket_path):
+        print(f"✅ Using HF Storage Bucket at {bucket_path} (from HF_BUCKET_PATH)")
+        return bucket_path
+
+    # 2. On HF Spaces — check for mounted Storage Buckets or persistent storage
+    if os.getenv("SPACE_ID"):
+        # Check /data for any mounted bucket or persistent storage
+        persistent_dir = "/data"
+        if _test_writable(persistent_dir):
+            print(f"✅ HF Spaces persistent storage detected at {persistent_dir}")
+            return persistent_dir
+        else:
+            print("⚠️ HF Spaces: /data is NOT writable!")
+            print("   → Mount a Storage Bucket: Space Settings > Storage Buckets > Mount a bucket")
+            print("   → Or set HF_BUCKET_PATH secret to the mounted bucket path")
+            print("   → Falling back to ephemeral storage (DB WILL BE LOST on restart)")
+
+    # 2. Local 'data' directory (for local development)
     local_dir = os.path.abspath("data")
     try:
         os.makedirs(local_dir, exist_ok=True)
-        # Test write permission
         test_file = os.path.join(local_dir, ".test")
         with open(test_file, "w") as f:
             f.write("test")
         os.remove(test_file)
         return local_dir
     except (PermissionError, OSError):
-        # Fallback to /tmp/data for read-only environments like HF Spaces
-        tmp_dir = "/tmp/data"
-        os.makedirs(tmp_dir, exist_ok=True)
-        return tmp_dir
+        pass
+
+    # 3. Fallback to /tmp/data (ephemeral)
+    tmp_dir = "/tmp/data"
+    os.makedirs(tmp_dir, exist_ok=True)
+    print(f"⚠️ Using ephemeral /tmp/data — database WILL be lost on restart!")
+    return tmp_dir
 
 DATA_DIR = get_data_dir()
 DB_PATH = os.path.join(DATA_DIR, "career_pilot.db")
@@ -42,13 +84,20 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         job_url TEXT NOT NULL,
+        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
     
     conn.commit()
+    
+    # Diagnostic: show how many users are persisted
+    cursor.execute("SELECT COUNT(*) FROM users")
+    user_count = cursor.fetchone()[0]
     conn.close()
-    print("📁 SQLite DB Initialized natively at `data/career_pilot.db`!")
+    
+    print(f"📁 SQLite DB at: {DB_PATH}")
+    print(f"   → {user_count} registered user(s) in database")
 
 def insert_user(email: str, locations: str, resume_text: str):
     conn = sqlite3.connect(DB_PATH)
@@ -67,6 +116,7 @@ def insert_user(email: str, locations: str, resume_text: str):
     
     conn.commit()
     conn.close()
+    print(f"💾 User saved: {email} (id={user_id})")
     return user_id
 
 def update_user_preferred_job(user_id: int, preferred_job: str):

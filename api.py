@@ -6,7 +6,7 @@ import PyPDF2
 import os
 
 from main import career_pilot_graph
-from db.database import init_db, insert_user, get_sent_jobs, get_all_users, DATA_DIR
+from db.database import init_db, insert_user, get_sent_jobs, get_all_users, DATA_DIR, DB_PATH
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 
@@ -16,11 +16,23 @@ def run_daily_hunt():
     """
     print("\n⏰ [CRON JOB STARTED] Executing Morning Universal Agent Hunting...")
     users = get_all_users()
+    
+    if not users:
+        print("   ⚠️ No registered users found in database!")
+        print(f"   📁 DB Path: {DB_PATH}")
+        print(f"   💡 Users must onboard via /api/initialize first.")
+        print(f"   💡 If users keep disappearing, enable Persistent Storage in HF Space Settings.")
+        print("[CRON JOB COMPLETED]\n")
+        return
+    
+    print(f"   👥 Found {len(users)} registered user(s)")
+    
     for user in users:
         user_id, email, preferred_job, locations, resume_text = user
         previously_sent = get_sent_jobs(user_id)
         
-        print(f"-> Hunting for User: {email} | Locations: {locations}")
+        print(f"\n-> Hunting for User: {email} | Job: {preferred_job} | Locations: {locations}")
+        print(f"   Previously sent: {len(previously_sent)} job URLs")
         
         initial_state = {
             "user_id": user_id,
@@ -33,8 +45,11 @@ def run_daily_hunt():
         }
         try:
             career_pilot_graph.invoke(initial_state)
+            print(f"   ✅ Pipeline completed for {email}")
         except Exception as e:
-            print(f"❌ Graph crashed for user {email}:", e)
+            print(f"   ❌ Graph crashed for user {email}: {e}")
+            import traceback
+            traceback.print_exc()
     
     print("[CRON JOB COMPLETED]\n")
 
@@ -75,11 +90,13 @@ async def debug_pipeline():
     Hit this to see exactly where things break on HF Spaces.
     """
     import json as json_mod
+    import sqlite3
     from agents.scout_agent import serper_search, is_direct_job_url
     from agents.config import llm as configured_llm
     
     results = {
         "env_vars": {},
+        "database": {},
         "serper_test": {},
         "url_filter_test": {},
         "llm_test": {},
@@ -98,10 +115,33 @@ async def debug_pipeline():
         "SENDGRID_API_KEY": bool(os.getenv("SENDGRID_API_KEY")),
         "SENDGRID_KEY_PREFIX": os.getenv("SENDGRID_API_KEY", "")[:8] + "..." if os.getenv("SENDGRID_API_KEY") else "MISSING",
         "EMAIL_SENDER": bool(os.getenv("EMAIL_SENDER")),
-        "EMAIL_SENDER_VALUE": os.getenv("EMAIL_SENDER", "")
+        "EMAIL_SENDER_VALUE": os.getenv("EMAIL_SENDER", ""),
+        "SPACE_ID": os.getenv("SPACE_ID", "NOT_ON_HF"),
     }
     
-    # 2. Test Serper - raw HTTP call to see actual response
+    # 2. Database diagnostics
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM sent_jobs")
+        sent_count = cursor.fetchone()[0]
+        cursor.execute("SELECT id, email, preferred_job, locations FROM users")
+        user_list = [{"id": r[0], "email": r[1], "preferred_job": r[2], "locations": r[3]} for r in cursor.fetchall()]
+        conn.close()
+        results["database"] = {
+            "status": "OK",
+            "db_path": DB_PATH,
+            "data_dir": DATA_DIR,
+            "user_count": user_count,
+            "sent_jobs_count": sent_count,
+            "users": user_list
+        }
+    except Exception as e:
+        results["database"] = {"status": "ERROR", "error": str(e), "db_path": DB_PATH}
+    
+    # 3. Test Serper - raw HTTP call to see actual response
     try:
         import http.client
         import json as json_lib
@@ -125,7 +165,7 @@ async def debug_pipeline():
     except Exception as e:
         results["serper_test"] = {"status": "ERROR", "error": str(e)}
     
-    # 3. Test URL filter on real results
+    # 4. Test URL filter on real results
     if results["serper_test"].get("status") == "OK":
         try:
             site_results = serper_search("site:linkedin.com/jobs/view/ AI Engineer India", num_results=5)
@@ -139,7 +179,7 @@ async def debug_pipeline():
         except Exception as e:
             results["url_filter_test"] = {"status": "ERROR", "error": str(e)}
     
-    # 4. Test LLM
+    # 5. Test LLM
     if configured_llm:
         try:
             from langchain_core.messages import HumanMessage
@@ -157,8 +197,10 @@ async def debug_pipeline():
     all_ok = (
         results["env_vars"]["SERPER_API_KEY"] and
         results["env_vars"]["LLM_LOADED"] and
+        results["env_vars"]["SENDGRID_API_KEY"] and
         results["serper_test"].get("status") == "OK" and
-        results["llm_test"].get("status") == "OK"
+        results["llm_test"].get("status") == "OK" and
+        results["database"].get("status") == "OK"
     )
     results["overall"] = "ALL_SYSTEMS_GO" if all_ok else "ISSUES_DETECTED"
     
@@ -170,6 +212,7 @@ def run_onboarding_workflow(resume_path: str, email: str, locations: str):
     """
     print("\n-------------------------------------------")
     print(f"🚀 [NEW USER ONBOARDING] Triggering First Scout!")
+    print(f"   Email: {email}")
     print(f"   Locations: {locations}")
     print("-------------------------------------------\n")
     
@@ -184,6 +227,12 @@ def run_onboarding_workflow(resume_path: str, email: str, locations: str):
     except Exception as e:
         print("Failed to read PDF:", e)
         return
+    
+    if not resume_text.strip():
+        print("❌ Resume PDF was empty or unreadable!")
+        return
+    
+    print(f"   📄 Extracted {len(resume_text)} chars from resume")
         
     # Inject user into the permanent SQLite Database!
     user_id = insert_user(email, locations, resume_text)
@@ -205,6 +254,8 @@ def run_onboarding_workflow(resume_path: str, email: str, locations: str):
         career_pilot_graph.invoke(initial_state)
     except Exception as e:
         print("❌ LangGraph workflow crashed:", str(e))
+        import traceback
+        traceback.print_exc()
     
     print("\n[ONBOARDING COMPLETED]\n")
 

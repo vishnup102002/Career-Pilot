@@ -152,6 +152,10 @@ def is_direct_job_url(url: str) -> bool:
         "boards.greenhouse.io/",
         "jobs.lever.co/",
         "getmereferred.com/job-listing/",
+        "myworkdayjobs.com/",
+        "smartrecruiters.com/",
+        "jobvite.com/",
+        "icims.com/",
     ]
     
     for pattern in direct_patterns:
@@ -195,6 +199,105 @@ def is_high_signal_text(text: str) -> bool:
         
     return True
 
+def _build_search_queries(preferred_job: str, locations: str, resume_summary: str) -> list:
+    """
+    Build a diverse set of search queries optimized for finding direct job postings.
+    """
+    location_list = [loc.strip() for loc in locations.split(',') if loc.strip()]
+    
+    # Generate search variations to avoid niche title bottleneck
+    clean_job = re.sub(r'\b(junior|senior|lead|intern|fresher|entry.level)\b', '', preferred_job, flags=re.IGNORECASE).strip()
+    clean_job = re.sub(r'\s+', ' ', clean_job)  # collapse whitespace
+    
+    # Base search terms
+    search_terms = [preferred_job]
+    if clean_job and clean_job.lower() != preferred_job.lower():
+        search_terms.append(clean_job)
+    
+    # Expand to broader terms based on keyword matching
+    lowercase_job = preferred_job.lower()
+    if any(kw in lowercase_job for kw in ["generative ai", "genai", "ai engineer", "llm"]):
+        search_terms.extend(["AI Engineer", "Generative AI Engineer", "Machine Learning Engineer", "Python Developer AI"])
+    elif any(kw in lowercase_job for kw in ["machine learning", "ml engineer", "data scientist"]):
+        search_terms.extend(["Machine Learning Engineer", "Data Scientist", "AI Engineer"])
+    elif any(kw in lowercase_job for kw in ["data analyst", "data engineer", "analytics"]):
+        search_terms.extend(["Data Analyst", "Data Engineer", "Business Analyst"])
+    elif any(kw in lowercase_job for kw in ["devops", "cloud", "sre", "infrastructure"]):
+        search_terms.extend(["DevOps Engineer", "Cloud Engineer", "Site Reliability Engineer"])
+    elif any(kw in lowercase_job for kw in ["full stack", "fullstack", "mern", "mean"]):
+        search_terms.extend(["Full Stack Developer", "Software Engineer", "Web Developer"])
+    elif any(kw in lowercase_job for kw in ["frontend", "front end", "react", "angular", "vue"]):
+        search_terms.extend(["Frontend Developer", "React Developer", "UI Developer"])
+    elif any(kw in lowercase_job for kw in ["backend", "back end", "api", "microservices"]):
+        search_terms.extend(["Backend Developer", "Software Engineer", "Python Developer"])
+    elif any(kw in lowercase_job for kw in ["software", "developer", "engineer", "programmer"]):
+        search_terms.extend(["Software Engineer", "Software Developer", "Python Developer"])
+    elif any(kw in lowercase_job for kw in ["android", "ios", "mobile", "flutter", "react native"]):
+        search_terms.extend(["Mobile Developer", "Android Developer", "Flutter Developer"])
+    elif any(kw in lowercase_job for kw in ["cyber", "security", "penetration", "soc"]):
+        search_terms.extend(["Cybersecurity Analyst", "Security Engineer", "SOC Analyst"])
+    else:
+        # Generic fallback — add "Developer" and "Engineer" variants
+        search_terms.extend([f"{clean_job} Developer", f"{clean_job} Engineer"])
+        
+    # Remove duplicates while preserving order
+    search_terms = list(dict.fromkeys([term.strip() for term in search_terms if term.strip()]))
+    
+    search_queries = []
+    
+    # PHASE 1: Site-specific direct job URL queries (highest signal)
+    for term in search_terms[:4]:
+        for location in location_list[:3]:
+            is_india = any(loc in location.lower() for loc in [
+                "kochi", "bangalore", "bengaluru", "mumbai", "delhi", "hyderabad", 
+                "chennai", "pune", "india", "noida", "gurgaon", "gurugram",
+                "kolkata", "ahmedabad", "jaipur", "thiruvananthapuram", "trivandrum"
+            ])
+            loc_suffix = f"{location} India" if (is_india and "india" not in location.lower()) else location
+            
+            search_queries.append(f'site:linkedin.com/jobs/view/ {term} {loc_suffix}')
+            search_queries.append(f'site:indeed.com/viewjob {term} {loc_suffix}')
+        
+        # Broader India-wide site queries
+        search_queries.append(f'site:linkedin.com/jobs/view/ {term} India')
+        search_queries.append(f'site:naukri.com/job-listings {term}')
+    
+    # PHASE 2: Remote job queries
+    for term in search_terms[:2]:
+        search_queries.append(f'site:linkedin.com/jobs/view/ {term} remote')
+        search_queries.append(f'site:weworkremotely.com/remote-jobs/ {term}')
+    
+    # PHASE 3: Open web queries as fallback (broader coverage)
+    from datetime import datetime
+    current_year = datetime.now().year
+    for term in search_terms[:3]:
+        search_queries.append(f'{term} jobs India apply {current_year}')
+        search_queries.append(f'{term} hiring India {current_year}')
+    
+    # PHASE 4: Naukri/Foundit specific (popular in India)
+    for term in search_terms[:2]:
+        search_queries.append(f'site:naukri.com {term} jobs')
+        search_queries.append(f'site:foundit.in {term}')
+
+    # LLM-optimized extra query
+    if llm and resume_summary:
+        query_prompt = f"""Given this Resume Summary: {resume_summary}
+The user wants: {preferred_job} jobs in {locations}.
+Write ONE highly optimized 5-6 word search query combining their skills with the job role.
+If the user is a junior or fresher, include 'junior' or 'entry level'.
+Reply with ONLY the query string, nothing else. No quotes."""
+        try:
+            extra_query = llm.invoke([HumanMessage(content=query_prompt)]).content.strip().replace('"', '')
+            search_queries.append(extra_query)
+            print(f"   -> LLM-optimized query: {extra_query}")
+        except Exception as e:
+            print(f"   ⚠️ LLM query generation failed: {e}")
+    
+    # Deduplicate and cap at 16 queries (balance coverage vs API cost)
+    search_queries = list(dict.fromkeys(search_queries))[:16]
+    
+    return search_queries
+
 def scout_node(state: AgentState):
     try:
         return _scout_node_inner(state)
@@ -211,69 +314,8 @@ def _scout_node_inner(state: AgentState):
     
     print(f"🕵️  ScoutAgent: Searching for '{preferred_job}' in [{locations}]...")
     
-    # Build smart search queries using the user's preferred job + locations
-    location_list = [loc.strip() for loc in locations.split(',') if loc.strip()]
-    
-    # Generate search variations to avoid niche title bottleneck
-    clean_job = preferred_job.replace("Junior", "").replace("junior", "").replace("Senior", "").replace("senior", "").replace("Lead", "").replace("lead", "").strip()
-    
-    # Base search terms
-    search_terms = [preferred_job, clean_job]
-    
-    # Expand to broader terms based on keyword matching
-    lowercase_job = preferred_job.lower()
-    if "generative ai" in lowercase_job or "genai" in lowercase_job or "ai" in lowercase_job:
-        search_terms.extend(["AI Engineer", "Generative AI Engineer", "Python Developer", "Machine Learning Engineer"])
-    elif "data" in lowercase_job:
-        search_terms.extend(["Data Scientist", "Data Analyst", "Machine Learning Engineer"])
-    elif "devops" in lowercase_job or "cloud" in lowercase_job:
-        search_terms.extend(["DevOps Engineer", "Cloud Engineer", "Site Reliability Engineer"])
-    elif "full stack" in lowercase_job or "software" in lowercase_job or "developer" in lowercase_job or "engineer" in lowercase_job:
-        search_terms.extend(["Software Engineer", "Python Developer", "Full Stack Developer"])
-        
-    # Remove duplicates and empty items
-    search_terms = list(dict.fromkeys([term.strip() for term in search_terms if term.strip()]))
-    
-    search_queries = []
-    for term in search_terms[:3]: # Limit to top 3 search terms to prevent query explosion
-        for location in location_list:
-            is_india_or_local = any(loc in location.lower() for loc in ["kochi", "bangalore", "mumbai", "delhi", "hyderabad", "chennai", "pune", "india"])
-            loc_suffix = f"{location} India" if (is_india_or_local and "india" not in location.lower()) else location
-            
-            # SITE-SPECIFIC queries FIRST — these return actual job pages, not aggregators
-            search_queries.append(f'site:linkedin.com/jobs/view/ {term} {loc_suffix}')
-            search_queries.append(f'site:indeed.com/viewjob {term} {loc_suffix}')
-        
-        # Broader site-specific queries
-        search_queries.append(f'site:linkedin.com/jobs/view/ {term} India')
-        search_queries.append(f'site:indeed.com/viewjob {term} India')
-        search_queries.append(f'site:naukri.com/job-listings {term}')
-        
-        # Remote search
-        search_queries.append(f'site:linkedin.com/jobs/view/ {term} remote')
-        search_queries.append(f'site:weworkremotely.com/remote-jobs/ {term}')
-    
-    # OPEN WEB queries as fallback — these return a mix of aggregators and direct pages
-    for term in search_terms[:2]:
-        search_queries.append(f'{term} jobs India apply 2025')
-        search_queries.append(f'{term} hiring India')
-        
-    # Limit queries to 14 to balance coverage vs API cost
-    search_queries = list(dict.fromkeys(search_queries))[:14]
-    
-    # LLM-optimized extra query
-    if llm and resume_summary:
-        query_prompt = f"""Given this Resume Summary: {resume_summary}
-The user wants: {preferred_job} jobs in {locations}.
-Write ONE highly optimized 5-6 word search query combining their skills with the job role.
-If the user is a junior or fresher, include 'junior' or 'entry level'.
-Reply with ONLY the query string, nothing else. No quotes."""
-        try:
-            extra_query = llm.invoke([HumanMessage(content=query_prompt)]).content.strip().replace('"', '')
-            search_queries.append(extra_query)
-            print(f"   -> LLM-optimized query: {extra_query}")
-        except Exception as e:
-            print(f"   ⚠️ LLM query generation failed: {e}")
+    # Build optimized search queries
+    search_queries = _build_search_queries(preferred_job, locations, resume_summary)
     
     print(f"🌐 ScoutAgent: Executing {len(search_queries)} targeted Google searches...")
     
@@ -283,12 +325,14 @@ Reply with ONLY the query string, nothing else. No quotes."""
     for query in search_queries:
         try:
             results = serper_search(query, num_results=10)
+            new_count = 0
             for r in results:
                 url = r.get('href', '')
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     all_results.append(r)
-            print(f"   ✅ '{query}': {len(results)} results")
+                    new_count += 1
+            print(f"   ✅ '{query}': {len(results)} results ({new_count} new)")
         except Exception as e:
             print(f"   ⚠️ Search failed for '{query}': {e}")
             continue
@@ -323,10 +367,11 @@ Reply with ONLY the query string, nothing else. No quotes."""
 
     # Skip MCP deep scraping — use Serper snippets directly for speed and reliability
     # MCP Browser server crashes on HF Spaces due to Playwright/Chromium issues
-    print(f"🕵️  ScoutAgent: Using Serper snippets for top {min(len(scraped_data), 8)} jobs (skipping deep scrape for reliability)...")
+    max_candidates = min(len(scraped_data), 12)
+    print(f"🕵️  ScoutAgent: Using Serper snippets for top {max_candidates} jobs (skipping deep scrape for reliability)...")
     
     final_job_data = []
-    for data in scraped_data[:8]:
+    for data in scraped_data[:max_candidates]:
         url = data.get('href')
         final_job_data.append({
             "title": data.get('title'),
@@ -352,7 +397,7 @@ Reply with ONLY the query string, nothing else. No quotes."""
     - Preferred Locations: {locations}
     
     LIVE SEARCH JOB RESULTS:
-    {scraped_text[:12000]}
+    {scraped_text[:15000]}
     
     Previously Sent Jobs (DO NOT suggest these URLs again):
     {state.get('previously_sent_jobs', [])}
@@ -360,20 +405,24 @@ Reply with ONLY the query string, nothing else. No quotes."""
     Task: Find the top 1 to 5 jobs that are the BEST MATCH for this user.
     
     EVALUATION CRITERIA (score each job out of 5):
-    1. JOB ROLE MATCH: The job title/description should be related to "{preferred_job}" or closely adjacent fields. Adjacent roles (e.g., ML Engineer for an AI Engineer candidate) are acceptable.
-    2. LOCATION MATCH: The job should be in one of these locations: {locations}, or be a remote position. If location is unclear from the snippet, still include the job.
-    3. EXPERIENCE MATCH: The user's experience level should reasonably fit the job requirements. For junior/fresher candidates, jobs requiring 0-2 years experience ARE valid matches. If the snippet does not specify experience requirements, do NOT reject the job.
-    4. EDUCATION MATCH: Only reject if the job explicitly requires a degree the user clearly lacks.
-    5. SKILL MATCH: The user should possess most of the core technical skills mentioned in the job description.
+    1. JOB ROLE MATCH: The job title/description should be related to "{preferred_job}" or closely adjacent fields. Adjacent roles (e.g., ML Engineer for an AI Engineer candidate, or Full Stack for a Backend candidate) are acceptable matches.
+    2. LOCATION MATCH: The job should be in one of these locations: {locations}, or be a remote position. If location is unclear from the snippet, ASSUME it's a match.
+    3. EXPERIENCE MATCH: The user's experience level should reasonably fit the job requirements. For junior/fresher candidates, jobs requiring 0-3 years experience ARE valid matches. If experience is not mentioned in the snippet, ASSUME it's a match.
+    4. EDUCATION MATCH: Only reject if the job explicitly requires a degree the user clearly lacks. If not mentioned, ASSUME it's a match.
+    5. SKILL MATCH: The user should possess most of the core technical skills mentioned. Partial overlap is acceptable.
     
     SCORING:
-    - Jobs passing 4-5 criteria = STRONG MATCH (include these)
-    - Jobs passing 3 criteria = POSSIBLE MATCH (include these if fewer than 3 strong matches exist)
+    - Jobs passing 4-5 criteria = STRONG MATCH (always include)
+    - Jobs passing 3 criteria = POSSIBLE MATCH (include if fewer than 3 strong matches)
     - Jobs passing 0-2 criteria = REJECT
     
-    IMPORTANT: When the search snippet is short (Serper snippet), be GENEROUS with your evaluation. A snippet saying "AI Engineer - Bangalore" with no other details should be treated as a possible match if role and location fit.
+    IMPORTANT RULES:
+    - When the search snippet is short, be GENEROUS. A snippet saying "AI Engineer - Bangalore" should be treated as a match if role and location fit.
+    - PREFER direct job page URLs (linkedin.com/jobs/view/, indeed.com/viewjob, naukri.com/job-listings) over listing pages.
+    - It is BETTER to include a borderline match than to return zero results.
+    - If ZERO jobs pass 3+ criteria, LOWER your threshold to 2 and include the top 3 closest matches.
     
-    If NO jobs pass at least 3 criteria, reply with EXACTLY: "NO STRICT MATCHES FOUND TODAY."
+    If after all this you truly have ZERO viable results, reply with EXACTLY: "NO STRICT MATCHES FOUND TODAY."
     
     CRITICAL URL RULE: You MUST copy the EXACT 'href' URL from the JSON data. DO NOT modify, shorten, or fabricate any URL!
     
@@ -387,6 +436,10 @@ Reply with ONLY the query string, nothing else. No quotes."""
     response = llm.invoke([HumanMessage(content=prompt)]) if llm else type('obj', (object,), {'content': '1. AI Engineer at Acme'})()
     
     # Extract URLs so we can save them in SQLite for deduction tomorrow
-    urls = re.findall(r'(https?://[^\s]+)', response.content)
+    urls = re.findall(r'(https?://[^\s\)]+)', response.content)
+    # Clean trailing punctuation from URLs
+    urls = [url.rstrip('.,;:!?)') for url in urls]
+    
+    print(f"   🎯 LLM matched {len(urls)} job URLs")
     
     return {"found_jobs": response.content, "extracted_urls": urls}
