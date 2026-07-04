@@ -235,6 +235,84 @@ def _is_stale_job(result: dict) -> bool:
     
     return False
 
+def _is_stale_job_content(text: str) -> bool:
+    """
+    Check if the full scraped content indicates the job is expired, filled, or closed.
+    """
+    if not text:
+        return False
+    lowercase_text = text.lower()
+    
+    expired_indicators = [
+        "no longer accepting applications",
+        "this job has expired",
+        "position has been filled",
+        "job is closed",
+        "no longer accepting",
+        "job posting has been removed",
+        "not accepting applications",
+        "page not found",
+        "404 error",
+        "unable to load this page",
+        "job is no longer active",
+        "unable to load the page",
+        "job posting is no longer available",
+    ]
+    for indicator in expired_indicators:
+        if indicator in lowercase_text:
+            return True
+            
+    return False
+
+def scrape_url_via_jina(url: str) -> str:
+    """
+    Scrapes the text/markdown content of a job page using Jina Reader API.
+    Does not require any credentials and uses proxies to bypass LinkedIn/Indeed bot protection.
+    """
+    import requests
+    try:
+        jina_url = f"https://r.jina.ai/{url}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/plain"
+        }
+        # Optional user configured Jina Token
+        jina_key = os.getenv("JINA_API_KEY", "").strip()
+        if jina_key:
+            headers["Authorization"] = f"Bearer {jina_key}"
+            
+        resp = requests.get(jina_url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            return resp.text
+        else:
+            print(f"      ⚠️ Jina Reader returned status {resp.status_code} for {url}")
+            return ""
+    except Exception as e:
+        print(f"      ⚠️ Jina Reader failed to scrape {url}: {e}")
+        return ""
+
+def scrape_multiple_urls(urls: list) -> dict:
+    """
+    Scrapes multiple URLs concurrently using a thread pool.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    results = {}
+    if not urls:
+        return results
+        
+    print(f"   🤖 Scraping {len(urls)} URLs in parallel via Jina Reader...")
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_to_url = {executor.submit(scrape_url_via_jina, url): url for url in urls}
+        for future in future_to_url:
+            url = future_to_url[future]
+            try:
+                data = future.result()
+                if data and data.strip():
+                    results[url] = data
+            except Exception as e:
+                print(f"      ⚠️ Thread failure for {url}: {e}")
+    return results
+
 def _build_search_queries(preferred_job: str, locations: str, resume_summary: str) -> list:
     """
     Build a diverse set of search queries optimized for finding direct job postings.
@@ -411,23 +489,42 @@ def _scout_node_inner(state: AgentState):
         print(f"   📊 DIAGNOSTIC: {len(search_queries)} queries executed, {len(all_results)} total results, 0 after filtering")
         return {"found_jobs": "NO STRICT MATCHES FOUND TODAY. The job search returned zero results. Please try again later.", "extracted_urls": []}
 
-    # Skip MCP deep scraping — use Serper snippets directly for speed and reliability
-    # MCP Browser server crashes on HF Spaces due to Playwright/Chromium issues
-    max_candidates = min(len(scraped_data), 12)
-    print(f"🕵️  ScoutAgent: Using Serper snippets for top {max_candidates} jobs (skipping deep scrape for reliability)...")
+    # Perform deep scraping of the top candidate URLs using Jina Reader
+    candidates_to_scrape = scraped_data[:8]
+    urls_to_scrape = [c.get('href') for c in candidates_to_scrape if c.get('href')]
+    
+    print(f"🕵️  ScoutAgent: Deep scraping {len(urls_to_scrape)} top job URLs using Jina Reader...")
+    scraped_contents = scrape_multiple_urls(urls_to_scrape)
     
     final_job_data = []
-    for data in scraped_data[:max_candidates]:
+    for data in candidates_to_scrape:
         url = data.get('href')
-        final_job_data.append({
-            "title": data.get('title'),
-            "href": url,
-            "text_source": "serper_snippet",
-            "content": data.get('body')
-        })
-        print(f"   ℹ️ {data.get('title', '')[:60]} -> {url[:70]}")
-    
-    print(f"   📊 Sending {len(final_job_data)} candidates to LLM for matching")
+        full_text = scraped_contents.get(url, "").strip()
+        
+        # If we got the full text, perform deep validation for expiry and load issues
+        if full_text:
+            if _is_stale_job_content(full_text):
+                print(f"   ❌ Rejected (Expired/Closed in Full Text): {data.get('title', '')[:50]} -> {url[:50]}")
+                continue
+            
+            final_job_data.append({
+                "title": data.get('title'),
+                "href": url,
+                "text_source": "jina_reader",
+                "content": full_text[:6000] # Cap text to avoid context overload
+            })
+            print(f"   ℹ️ Scraped full text: {data.get('title', '')[:50]} -> {url[:50]}")
+        else:
+            # Fallback to Serper snippet if scraping failed
+            final_job_data.append({
+                "title": data.get('title'),
+                "href": url,
+                "text_source": "serper_snippet",
+                "content": data.get('body')
+            })
+            print(f"   ℹ️ Fallback to snippet: {data.get('title', '')[:50]} -> {url[:50]}")
+            
+    print(f"   📊 Sending {len(final_job_data)} candidate jobs to LLM for matching")
 
     scraped_text = json.dumps(final_job_data, indent=2)
 
