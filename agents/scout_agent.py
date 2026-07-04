@@ -66,32 +66,39 @@ def serper_search(query, num_results=10, time_filter="qdr:m"):
 
 async def scrape_urls_with_mcp(urls):
     """
-    Connects to the local Browser MCP Server to scrape full job descriptions.
+    Connects to the local Browser MCP Server to scrape full job descriptions concurrently.
     """
     if not urls:
-        return []
+        return {}
         
     server_params = StdioServerParameters(
         command=sys.executable,
         args=["mcp_servers/browser_mcp.py"],
     )
     
-    results = []
+    results = {}
     try:
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                for url in urls:
+                
+                async def call_tool_safe(url):
                     try:
-                        print(f"   🤖 MCP Client: Asking Browser Server to scrape -> {url}")
+                        print(f"   🤖 MCP Client: Scraping via tool -> {url[:60]}...")
                         res = await session.call_tool("scrape_job_description", arguments={"url": url})
                         if res.content and len(res.content) > 0:
-                            results.append({
-                                "url": url, 
-                                "full_text": res.content[0].text
-                            })
-                    except Exception as scrape_err:
-                        print(f"   ⚠️ MCP Client failed to scrape {url}: {scrape_err}")
+                            return url, res.content[0].text
+                    except Exception as err:
+                        print(f"   ⚠️ MCP Client tool call failed for {url[:50]}: {err}")
+                    return url, ""
+
+                tasks = [call_tool_safe(url) for url in urls]
+                completed_tasks = await asyncio.gather(*tasks)
+                
+                for url, text in completed_tasks:
+                    if text and text.strip():
+                        results[url] = text
+                        
     except Exception as e:
         print(f"   🚨 Failed to connect to MCP Server: {e}")
         
@@ -264,135 +271,29 @@ def _is_stale_job_content(text: str) -> bool:
             
     return False
 
-def scrape_url_via_jina(url: str, retries=1) -> str:
-    """
-    Scrapes the text/markdown content of a job page using Jina Reader API.
-    Uses a 15-second timeout and retries once on timeout.
-    """
-    import requests
-    import time
-    jina_url = f"https://r.jina.ai/{url}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/plain"
-    }
-    jina_key = os.getenv("JINA_API_KEY", "").strip()
-    if jina_key:
-        headers["Authorization"] = f"Bearer {jina_key}"
-        
-    for attempt in range(retries + 1):
-        try:
-            resp = requests.get(jina_url, headers=headers, timeout=15)
-            if resp.status_code == 200:
-                return resp.text
-            else:
-                print(f"      ⚠️ Jina Reader returned status {resp.status_code} for {url}")
-        except requests.exceptions.Timeout:
-            print(f"      ⚠️ Jina Reader timeout on {url} (Attempt {attempt+1}/{retries+1})")
-            if attempt < retries:
-                time.sleep(2)  # Wait before retrying
-        except Exception as e:
-            print(f"      ⚠️ Jina Reader failed to scrape {url}: {e}")
-            break
-            
-    return ""
-
-def scrape_via_apify(urls: list, token: str) -> dict:
-    """
-    Uses Apify's RAG Web Browser actor to scrape the URLs.
-    Extremely reliable for scraping LinkedIn and Indeed because it uses rotating residential proxies.
-    """
-    import requests
-    import time
-    
-    results = {}
-    if not urls:
-        return results
-        
-    print(f"   🤖 Apify: Starting scraping for {len(urls)} URLs...")
-    try:
-        # Run apify/rag-web-browser
-        run_url = f"https://api.apify.com/v2/acts/apify~rag-web-browser/runs?token={token}"
-        payload = {
-            "startUrls": [{"url": url} for url in urls],
-            "maxPagesPerCrawl": len(urls),
-            "dynamicContentWaitSecs": 2,
-        }
-        
-        resp = requests.post(run_url, json=payload, timeout=20)
-        if resp.status_code != 201:
-            print(f"   ⚠️ Apify actor start failed: {resp.status_code} {resp.text}")
-            return results
-            
-        run_data = resp.json().get("data", {})
-        run_id = run_data.get("id")
-        dataset_id = run_data.get("defaultDatasetId")
-        
-        print(f"   🤖 Apify: Run ID {run_id} started. Waiting for completion...")
-        
-        status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={token}"
-        start_time = time.time()
-        completed = False
-        
-        # Poll for completion (up to 60 seconds)
-        while time.time() - start_time < 60:
-            time.sleep(4)
-            status_resp = requests.get(status_url, timeout=10)
-            if status_resp.status_code == 200:
-                status = status_resp.json().get("data", {}).get("status")
-                if status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
-                    if status == "SUCCEEDED":
-                        completed = True
-                    break
-        
-        if completed:
-            items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={token}"
-            items_resp = requests.get(items_url, timeout=15)
-            if items_resp.status_code == 200:
-                for item in items_resp.json():
-                    url = item.get("url")
-                    text = item.get("text", "") or item.get("markdown", "")
-                    if url and text:
-                        results[url] = text
-                print(f"   ✅ Apify: Successfully scraped {len(results)} pages!")
-            else:
-                print(f"   ⚠️ Apify: Failed to fetch dataset ({items_resp.status_code})")
-        else:
-            print("   ⚠️ Apify: Scraping timed out or failed.")
-            
-    except Exception as e:
-        print(f"   ❌ Apify API call failed: {e}")
-        
-    return results
-
 def scrape_multiple_urls(urls: list) -> dict:
     """
-    Scrapes multiple URLs concurrently.
-    Uses Apify if APIFY_API_TOKEN is configured in environment, otherwise falls back to Jina Reader.
+    Scrapes multiple URLs concurrently using the Browser MCP Server.
+    The MCP Server handles selection of Apify, Jina, or Playwright based on config.
     """
-    from concurrent.futures import ThreadPoolExecutor
-    
-    apify_token = os.getenv("APIFY_API_TOKEN", "").strip()
-    if apify_token:
-        print("   🔑 APIFY_API_TOKEN secret detected. Running premium scraper...")
-        return scrape_via_apify(urls, apify_token)
-        
-    print("   ℹ️ No APIFY_API_TOKEN detected. Using free Jina Reader...")
-    results = {}
     if not urls:
-        return results
+        return {}
         
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        future_to_url = {executor.submit(scrape_url_via_jina, url): url for url in urls}
-        for future in future_to_url:
-            url = future_to_url[future]
-            try:
-                data = future.result()
-                if data and data.strip():
-                    results[url] = data
-            except Exception as e:
-                print(f"      ⚠️ Thread failure for {url}: {e}")
-    return results
+    print(f"   🤖 MCP Client: Connecting to Browser MCP Server for {len(urls)} URLs...")
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    if loop.is_running():
+        # Execute asynchronously in a separate thread to avoid event loop conflicts in FastAPI
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(lambda: asyncio.run(scrape_urls_with_mcp(urls))).result()
+    else:
+        return loop.run_until_complete(scrape_urls_with_mcp(urls))
 
 def _build_search_queries(preferred_job: str, locations: str, resume_summary: str) -> list:
     """
