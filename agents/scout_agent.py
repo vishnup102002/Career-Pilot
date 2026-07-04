@@ -264,43 +264,124 @@ def _is_stale_job_content(text: str) -> bool:
             
     return False
 
-def scrape_url_via_jina(url: str) -> str:
+def scrape_url_via_jina(url: str, retries=1) -> str:
     """
     Scrapes the text/markdown content of a job page using Jina Reader API.
-    Does not require any credentials and uses proxies to bypass LinkedIn/Indeed bot protection.
+    Uses a 15-second timeout and retries once on timeout.
     """
     import requests
-    try:
-        jina_url = f"https://r.jina.ai/{url}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/plain"
-        }
-        # Optional user configured Jina Token
-        jina_key = os.getenv("JINA_API_KEY", "").strip()
-        if jina_key:
-            headers["Authorization"] = f"Bearer {jina_key}"
+    import time
+    jina_url = f"https://r.jina.ai/{url}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/plain"
+    }
+    jina_key = os.getenv("JINA_API_KEY", "").strip()
+    if jina_key:
+        headers["Authorization"] = f"Bearer {jina_key}"
+        
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.get(jina_url, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                return resp.text
+            else:
+                print(f"      ⚠️ Jina Reader returned status {resp.status_code} for {url}")
+        except requests.exceptions.Timeout:
+            print(f"      ⚠️ Jina Reader timeout on {url} (Attempt {attempt+1}/{retries+1})")
+            if attempt < retries:
+                time.sleep(2)  # Wait before retrying
+        except Exception as e:
+            print(f"      ⚠️ Jina Reader failed to scrape {url}: {e}")
+            break
             
-        resp = requests.get(jina_url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            return resp.text
-        else:
-            print(f"      ⚠️ Jina Reader returned status {resp.status_code} for {url}")
-            return ""
-    except Exception as e:
-        print(f"      ⚠️ Jina Reader failed to scrape {url}: {e}")
-        return ""
+    return ""
 
-def scrape_multiple_urls(urls: list) -> dict:
+def scrape_via_apify(urls: list, token: str) -> dict:
     """
-    Scrapes multiple URLs concurrently using a thread pool.
+    Uses Apify's RAG Web Browser actor to scrape the URLs.
+    Extremely reliable for scraping LinkedIn and Indeed because it uses rotating residential proxies.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    import requests
+    import time
+    
     results = {}
     if not urls:
         return results
         
-    print(f"   🤖 Scraping {len(urls)} URLs in parallel via Jina Reader...")
+    print(f"   🤖 Apify: Starting scraping for {len(urls)} URLs...")
+    try:
+        # Run apify/rag-web-browser
+        run_url = f"https://api.apify.com/v2/acts/apify~rag-web-browser/runs?token={token}"
+        payload = {
+            "startUrls": [{"url": url} for url in urls],
+            "maxPagesPerCrawl": len(urls),
+            "dynamicContentWaitSecs": 2,
+        }
+        
+        resp = requests.post(run_url, json=payload, timeout=20)
+        if resp.status_code != 201:
+            print(f"   ⚠️ Apify actor start failed: {resp.status_code} {resp.text}")
+            return results
+            
+        run_data = resp.json().get("data", {})
+        run_id = run_data.get("id")
+        dataset_id = run_data.get("defaultDatasetId")
+        
+        print(f"   🤖 Apify: Run ID {run_id} started. Waiting for completion...")
+        
+        status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={token}"
+        start_time = time.time()
+        completed = False
+        
+        # Poll for completion (up to 60 seconds)
+        while time.time() - start_time < 60:
+            time.sleep(4)
+            status_resp = requests.get(status_url, timeout=10)
+            if status_resp.status_code == 200:
+                status = status_resp.json().get("data", {}).get("status")
+                if status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
+                    if status == "SUCCEEDED":
+                        completed = True
+                    break
+        
+        if completed:
+            items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={token}"
+            items_resp = requests.get(items_url, timeout=15)
+            if items_resp.status_code == 200:
+                for item in items_resp.json():
+                    url = item.get("url")
+                    text = item.get("text", "") or item.get("markdown", "")
+                    if url and text:
+                        results[url] = text
+                print(f"   ✅ Apify: Successfully scraped {len(results)} pages!")
+            else:
+                print(f"   ⚠️ Apify: Failed to fetch dataset ({items_resp.status_code})")
+        else:
+            print("   ⚠️ Apify: Scraping timed out or failed.")
+            
+    except Exception as e:
+        print(f"   ❌ Apify API call failed: {e}")
+        
+    return results
+
+def scrape_multiple_urls(urls: list) -> dict:
+    """
+    Scrapes multiple URLs concurrently.
+    Uses Apify if APIFY_API_TOKEN is configured in environment, otherwise falls back to Jina Reader.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    
+    apify_token = os.getenv("APIFY_API_TOKEN", "").strip()
+    if apify_token:
+        print("   🔑 APIFY_API_TOKEN secret detected. Running premium scraper...")
+        return scrape_via_apify(urls, apify_token)
+        
+    print("   ℹ️ No APIFY_API_TOKEN detected. Using free Jina Reader...")
+    results = {}
+    if not urls:
+        return results
+        
     with ThreadPoolExecutor(max_workers=6) as executor:
         future_to_url = {executor.submit(scrape_url_via_jina, url): url for url in urls}
         for future in future_to_url:
