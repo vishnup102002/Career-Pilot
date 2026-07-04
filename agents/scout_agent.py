@@ -583,12 +583,18 @@ def _scout_node_inner(state: AgentState):
     """
     
     response = llm.invoke([HumanMessage(content=prompt)]) if llm else type('obj', (object,), {'content': '1. AI Engineer at Acme'})()
+    response_content = response.content.strip()
+    
+    # If the LLM rejected all jobs, clear urls to prevent blacklisting in DB
+    if "NO STRICT MATCHES FOUND TODAY" in response_content:
+        print("   🎯 LLM Decision: NO STRICT MATCHES FOUND TODAY.")
+        return {"found_jobs": "NO STRICT MATCHES FOUND TODAY.", "extracted_urls": []}
     
     # Extract URLs so we can save them in SQLite for deduction tomorrow
-    urls = re.findall(r'(https?://[^\s\)]+)', response.content)
+    urls = re.findall(r'(https?://[^\s\)]+)', response_content)
     # Clean trailing punctuation from URLs
     urls = [url.rstrip('.,;:!?)') for url in urls]
     
     print(f"   🎯 LLM matched {len(urls)} job URLs")
     
-    return {"found_jobs": response.content, "extracted_urls": urls}
+    return {"found_jobs": response_content, "extracted_urls": urls}
