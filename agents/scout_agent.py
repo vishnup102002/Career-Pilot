@@ -66,7 +66,8 @@ def serper_search(query, num_results=10, time_filter="qdr:m"):
 
 async def scrape_urls_with_mcp(urls):
     """
-    Connects to the local Browser MCP Server to scrape full job descriptions concurrently.
+    Connects to the local Browser MCP Server to scrape full job descriptions.
+    Uses the batch tool if available to optimize Apify runs.
     """
     if not urls:
         return {}
@@ -82,22 +83,39 @@ async def scrape_urls_with_mcp(urls):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 
-                async def call_tool_safe(url):
-                    try:
-                        print(f"   🤖 MCP Client: Scraping via tool -> {url[:60]}...")
-                        res = await session.call_tool("scrape_job_description", arguments={"url": url})
-                        if res.content and len(res.content) > 0:
-                            return url, res.content[0].text
-                    except Exception as err:
-                        print(f"   ⚠️ MCP Client tool call failed for {url[:50]}: {err}")
-                    return url, ""
-
-                tasks = [call_tool_safe(url) for url in urls]
-                completed_tasks = await asyncio.gather(*tasks)
+                # Check for batch tool availability
+                tools = await session.list_tools()
+                tool_names = [t.name for t in tools.tools]
                 
-                for url, text in completed_tasks:
-                    if text and text.strip():
-                        results[url] = text
+                if "scrape_multiple_job_descriptions" in tool_names:
+                    print(f"   🤖 MCP Client: Triggering batch tool scrape_multiple_job_descriptions for {len(urls)} URLs...")
+                    res = await session.call_tool("scrape_multiple_job_descriptions", arguments={"urls": urls})
+                    if res.content and len(res.content) > 0:
+                        try:
+                            parsed = json.loads(res.content[0].text)
+                            if isinstance(parsed, dict):
+                                results = parsed
+                        except Exception as parse_err:
+                            print(f"   ⚠️ MCP Client: Failed to parse batch JSON response: {parse_err}")
+                else:
+                    # Fallback to concurrent single tool calls
+                    print("   🤖 MCP Client: Batch tool not supported. Falling back to concurrent calls...")
+                    async def call_tool_safe(url):
+                        try:
+                            print(f"   🤖 MCP Client: Scraping via tool -> {url[:60]}...")
+                            res = await session.call_tool("scrape_job_description", arguments={"url": url})
+                            if res.content and len(res.content) > 0:
+                                return url, res.content[0].text
+                        except Exception as err:
+                            print(f"   ⚠️ MCP Client tool call failed for {url[:50]}: {err}")
+                        return url, ""
+
+                    tasks = [call_tool_safe(url) for url in urls]
+                    completed_tasks = await asyncio.gather(*tasks)
+                    
+                    for url, text in completed_tasks:
+                        if text and text.strip():
+                            results[url] = text
                         
     except Exception as e:
         print(f"   🚨 Failed to connect to MCP Server: {e}")
