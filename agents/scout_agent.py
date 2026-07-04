@@ -10,9 +10,10 @@ from langchain_core.messages import HumanMessage
 from agents.state import AgentState
 from agents.config import llm
 
-def serper_search(query, num_results=10):
+def serper_search(query, num_results=10, time_filter="qdr:m"):
     """
-    Uses Serper.dev to get real Google search results seamlessly.
+    Uses Serper.dev to get real Google search results.
+    time_filter: 'qdr:d' (past day), 'qdr:w' (past week), 'qdr:m' (past month), None (all time)
     """
     api_key = os.getenv("SERPER_API_KEY", "").strip()
     if not api_key:
@@ -22,12 +23,17 @@ def serper_search(query, num_results=10):
     results = []
     try:
         conn = http.client.HTTPSConnection("google.serper.dev")
-        payload = json.dumps({
+        payload_dict = {
           "q": query,
           "num": num_results,
-          "gl": "in",  # Force India results regardless of server location
-          "hl": "en"   # English results
-        })
+          "gl": "in",
+          "hl": "en"
+        }
+        # Add time-based filter to get only recent results
+        if time_filter:
+            payload_dict["tbs"] = time_filter
+        
+        payload = json.dumps(payload_dict)
         headers = {
           'X-API-KEY': api_key,
           'Content-Type': 'application/json'
@@ -48,6 +54,7 @@ def serper_search(query, num_results=10):
                 "title": item.get("title", ""),
                 "href": item.get("link", ""),
                 "body": item.get("snippet", ""),
+                "date": item.get("date", ""),
             })
         
         if not results:
@@ -199,6 +206,35 @@ def is_high_signal_text(text: str) -> bool:
         
     return True
 
+def _is_stale_job(result: dict) -> bool:
+    """
+    Detect stale/expired job postings from snippet text or metadata.
+    Returns True if the job appears old or expired.
+    """
+    text = (result.get('body', '') + ' ' + result.get('title', '') + ' ' + result.get('date', '')).lower()
+    
+    # Expired/closed indicators
+    stale_indicators = [
+        "no longer accepting", "this job has expired", "position filled",
+        "position closed", "application closed", "job closed",
+        "no longer available", "listing has expired",
+    ]
+    for indicator in stale_indicators:
+        if indicator in text:
+            return True
+    
+    # Old date indicators (more than ~2 months old)
+    old_date_patterns = [
+        r'\b(\d+)\+?\s*years?\s*ago\b',
+        r'\b([3-9]|1[0-2])\+?\s*months?\s*ago\b',  # 3+ months ago
+    ]
+    for pattern in old_date_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return True
+    
+    return False
+
 def _build_search_queries(preferred_job: str, locations: str, resume_summary: str) -> list:
     """
     Build a diverse set of search queries optimized for finding direct job postings.
@@ -324,15 +360,25 @@ def _scout_node_inner(state: AgentState):
     
     for query in search_queries:
         try:
-            results = serper_search(query, num_results=10)
+            # Use past-month filter for site-specific queries, past-week for open web
+            is_site_query = query.startswith('site:')
+            time_filter = "qdr:m" if is_site_query else "qdr:w"
+            
+            results = serper_search(query, num_results=10, time_filter=time_filter)
             new_count = 0
+            stale_count = 0
             for r in results:
                 url = r.get('href', '')
                 if url and url not in seen_urls:
+                    # Filter out stale/expired jobs
+                    if _is_stale_job(r):
+                        stale_count += 1
+                        continue
                     seen_urls.add(url)
                     all_results.append(r)
                     new_count += 1
-            print(f"   ✅ '{query}': {len(results)} results ({new_count} new)")
+            stale_msg = f", {stale_count} stale filtered" if stale_count else ""
+            print(f"   ✅ '{query}': {len(results)} results ({new_count} new{stale_msg})")
         except Exception as e:
             print(f"   ⚠️ Search failed for '{query}': {e}")
             continue
@@ -387,7 +433,7 @@ def _scout_node_inner(state: AgentState):
 
     print("🕵️  ScoutAgent: Matching search results against Resume + Preferences...")
     prompt = f"""
-    You are a precise AI Job Matcher. Your job is to find the BEST matches between a user's profile and live job results.
+    You are a STRICT AI Job Matcher. Find ONLY jobs that genuinely match this candidate's profile.
     
     USER PROFILE: 
     {resume_summary}
@@ -402,34 +448,40 @@ def _scout_node_inner(state: AgentState):
     Previously Sent Jobs (DO NOT suggest these URLs again):
     {state.get('previously_sent_jobs', [])}
     
-    Task: Find the top 1 to 5 jobs that are the BEST MATCH for this user.
+    Task: Find the top 1 to 5 jobs that STRICTLY MATCH this user's profile.
     
-    EVALUATION CRITERIA (score each job out of 5):
-    1. JOB ROLE MATCH: The job title/description should be related to "{preferred_job}" or closely adjacent fields. Adjacent roles (e.g., ML Engineer for an AI Engineer candidate, or Full Stack for a Backend candidate) are acceptable matches.
-    2. LOCATION MATCH: The job should be in one of these locations: {locations}, or be a remote position. If location is unclear from the snippet, ASSUME it's a match.
-    3. EXPERIENCE MATCH: The user's experience level should reasonably fit the job requirements. For junior/fresher candidates, jobs requiring 0-3 years experience ARE valid matches. If experience is not mentioned in the snippet, ASSUME it's a match.
-    4. EDUCATION MATCH: Only reject if the job explicitly requires a degree the user clearly lacks. If not mentioned, ASSUME it's a match.
-    5. SKILL MATCH: The user should possess most of the core technical skills mentioned. Partial overlap is acceptable.
+    ═══ MANDATORY REJECTION RULES (apply these FIRST) ═══
+    
+    IMMEDIATELY REJECT any job that:
+    1. ❌ STALE/EXPIRED: Contains phrases like "no longer accepting", "X year(s) ago", "position filled", "closed", "expired", "0 applicants" with old dates. Only include jobs that appear RECENTLY POSTED (within the last 30 days).
+    2. ❌ EXPERIENCE MISMATCH: If the user is a fresher/junior (0-1 years), REJECT jobs requiring 3+ years of experience. If the user has 2-4 years, REJECT jobs requiring 7+ years. Experience level MUST be compatible.
+    3. ❌ SENIOR ROLE MISMATCH: REJECT "Senior", "Staff", "Principal", "Lead", "Architect", "Manager" level roles for fresher/junior candidates.
+    
+    ═══ EVALUATION CRITERIA (score remaining jobs out of 5) ═══
+    
+    1. JOB ROLE MATCH: Title must be related to "{preferred_job}" or a closely adjacent field.
+    2. LOCATION MATCH: Must be in {locations}, or remote. If unclear, assume match.
+    3. EXPERIENCE MATCH: User's experience level must fit. For freshers: 0-1 year roles only. For juniors: 0-2 year roles.
+    4. SKILL MATCH: User should possess at least 60% of core skills mentioned.
+    5. FRESHNESS: Job must appear to be recently posted (not months/years old).
     
     SCORING:
-    - Jobs passing 4-5 criteria = STRONG MATCH (always include)
-    - Jobs passing 3 criteria = POSSIBLE MATCH (include if fewer than 3 strong matches)
-    - Jobs passing 0-2 criteria = REJECT
+    - 5/5 criteria = STRONG MATCH (always include)
+    - 4/5 criteria = GOOD MATCH (include)
+    - 3/5 criteria = WEAK MATCH (only include if fewer than 2 strong matches)
+    - 0-2/5 criteria = REJECT
     
-    IMPORTANT RULES:
-    - When the search snippet is short, be GENEROUS. A snippet saying "AI Engineer - Bangalore" should be treated as a match if role and location fit.
-    - PREFER direct job page URLs (linkedin.com/jobs/view/, indeed.com/viewjob, naukri.com/job-listings) over listing pages.
-    - It is BETTER to include a borderline match than to return zero results.
-    - If ZERO jobs pass 3+ criteria, LOWER your threshold to 2 and include the top 3 closest matches.
+    QUALITY OVER QUANTITY: It is BETTER to return 2 excellent matches than 5 mediocre ones.
     
-    If after all this you truly have ZERO viable results, reply with EXACTLY: "NO STRICT MATCHES FOUND TODAY."
+    If ZERO jobs pass 3+ criteria, reply with EXACTLY: "NO STRICT MATCHES FOUND TODAY."
     
-    CRITICAL URL RULE: You MUST copy the EXACT 'href' URL from the JSON data. DO NOT modify, shorten, or fabricate any URL!
+    CRITICAL URL RULE: Copy the EXACT 'href' URL from the JSON data. DO NOT modify or fabricate URLs!
     
     Format matches EXACTLY like this:
     1. [Job Title] at [Company] — [Location]
        Match Score: [e.g., 85%]
-       Why it's a match: [Brief explanation of how their skills, experience, and location align]
+       Experience Required: [e.g., 0-2 years / Fresher / Not specified]
+       Why it's a match: [Specific skills from their resume that align + experience fit]
        Apply Here: [EXACT 'href' URL from the JSON data]
     """
     
