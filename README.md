@@ -25,8 +25,8 @@ pinned: false
 Modern job hunting is bottlenecked by generic, high-volume applications that rarely convert. **Career-Pilot** bridges this gap:
 
 - **High-Intent Targeting** — Discovers technical roles semantically aligned to the candidate's actual skills, not just keyword matches.
-- **Autonomous Pipeline** — Four specialized LangGraph agents run sequentially from resume parsing to email delivery with no manual steps.
-- **Serverless Scraping** — A custom FastMCP browser server runs headless Playwright client-side, bypassing SPA rendering traps without exposing infrastructure.
+- **Autonomous Pipeline** — Four specialized LangGraph nodes run sequentially from resume parsing to email delivery with no manual steps.
+- **Serverless Scraping** — A custom FastMCP browser server runs headless Playwright or premium Apify/Jina services client-side, bypassing SPA rendering traps without exposing infrastructure.
 
 ---
 
@@ -36,57 +36,65 @@ Career-Pilot orchestrates four distinct specialized agents within a stateful, cy
 
 ```mermaid
 graph TD
-    Start((Start Onboarding / Daily Cron)) --> ResearchNode[📚 ResearchAgent\nAnalyze Resume and Ideal Role]
-    ResearchNode --> ScoutNode[🕵️ ScoutAgent\nOptimized Job Hunting Searches]
-    ScoutNode --> MatchEngine[🧠 LLM Scoring Engine\nGenerous Profile Matching]
-    MatchEngine --> WriterNode[✍️ WriterAgent\nFormat Personalized Email List]
-    WriterNode --> AlertNode[🚨 AlertAgent\nSendGrid Email and SQLite Dedup]
+    Start((Start Onboarding / Daily Cron)) --> ResearchNode["📚 research Node (ResearchAgent)<br/>Analyze Resume & Infer Job Title"]
+    ResearchNode --> ScoutNode["🕵️ scout Node (ScoutAgent)<br/>1. Multi-query Google Search (Serper)<br/>2. Headless SPA Scraping (MCP/Playwright)<br/>3. LLM Profile Scoring & Match Filter"]
+    ScoutNode --> WriterNode["✍️ writer Node (WriterAgent)<br/>Format Matches into Targeted Pitch"]
+    WriterNode --> AlertNode["🚨 alert Node (AlertAgent)<br/>Send Email Alerts & Save Sent Job URLs"]
     AlertNode --> End((End Workflow))
 
     subgraph State["LangGraph TypedDict State"]
         direction LR
-        StateVar[user_id\nresume_summary\npreferred_job\nfound_jobs\ndrafted_response\nextracted_urls]
+        StateVar["user_id<br/>email_address<br/>preferred_job<br/>locations<br/>resume_text<br/>resume_summary<br/>previously_sent_jobs<br/>found_jobs<br/>drafted_response<br/>extracted_urls"]
     end
 ```
 
 ### Agent Responsibilities
 
-| Agent | Role | Key Output |
+| Agent / Node | Role | Key Output / Action |
 | :--- | :--- | :--- |
-| **📚 Research Agent** | Parses uploaded resume to extract a structured technical DNA report — core stacks, years of experience, location constraints, and best-fit role inference | `resume_summary`, `preferred_job` |
-| **🕵️ Scout Agent** | Generates multi-variant search queries against LinkedIn, Indeed, Naukri, and WeWorkRemotely; filters aggregator URLs; runs headless Playwright scraping via FastMCP | `found_jobs` (raw candidates) |
-| **🧠 LLM Scoring Engine** | Scores each job out of 5 across role title, location, experience level, education, and skill overlap; retains listings scoring ≥ 3/5 | `found_jobs` (filtered) |
-| **✍️ Writer Agent** | Maps job relevance to resume history; tags listings with source platform markers (📍 via LinkedIn, 📍 via Indeed); builds a high-impact bulleted catalog | `drafted_response` |
-| **🚨 Alert Agent** | Delivers the formatted catalog via SendGrid; permanently indexes dispatched URLs in SQLite to prevent repeat alerts | Email sent + `extracted_urls` logged |
+| **📚 Research Agent** (`research`) | Parses uploaded resume to extract a structured technical DNA report — core stacks, years of experience, location constraints, and best-fit role inference. Updates the user's inferred job role in SQLite database. | `resume_summary`, `preferred_job` |
+| **🕵️ Scout Agent** (`scout`) | Generates multi-variant search queries against LinkedIn, Indeed, Naukri, and WeWorkRemotely; filters aggregator URLs; runs headless Playwright scraping via FastMCP (with premium Jina/Apify options); and scores listings (score ≥ 3/5). | `found_jobs` (filtered match text), `extracted_urls` |
+| **✍️ Writer Agent** (`writer`) | Maps job relevance to resume history; tags listings with source platform markers (📍 via LinkedIn, 📍 via Indeed); builds a high-impact bulleted catalog. | `drafted_response` |
+| **🚨 Alert Agent** (`alert`) | Delivers the formatted catalog via SendGrid, Resend, or Gmail SMTP; permanently indexes dispatched URLs in SQLite on success to prevent duplicate alerts. | Email sent + `extracted_urls` logged in DB |
 
 ---
 
 ## 🛠️ System Architecture & Data Flow
 
-GestureLearn uses a decoupled, modular design divided into a **FastAPI server** (orchestrator + web UI) and a **LangGraph pipeline** (inference and agent execution engine).
+Career-Pilot uses a decoupled, modular design divided into a **FastAPI server** (orchestrator + web UI) and a **LangGraph pipeline** (inference and agent execution engine).
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as Candidate
-    participant UI as FastAPI Web UI
+    participant Server as FastAPI Server / Cron
+    participant DB as SQLite DB
     participant LG as LangGraph Pipeline
-    participant MCP as Browser MCP (Playwright)
-    participant DB as SQLite (Dedup Store)
-    participant SG as SendGrid
+    participant MCP as Browser MCP (Playwright/Jina)
+    participant Email as Email Service (SendGrid/Resend/SMTP)
 
-    User->>UI: Uploads resume + submits onboarding form
-    UI->>LG: Triggers graph execution with AgentState
-    LG->>LG: ResearchAgent parses resume, infers best-fit role
-    LG->>MCP: ScoutAgent requests deep SPA scraping for job URLs
-    MCP->>LG: Returns extracted page content
-    LG->>LG: LLM Scoring Engine filters jobs with score >= 3/5
-    LG->>LG: WriterAgent formats personalized email catalog
-    LG->>DB: AlertAgent checks for previously sent URLs
-    DB->>LG: Returns dedup exclusion list
-    LG->>SG: Dispatches final email with new listings only
-    SG->>User: Delivers targeted job alert email
-    LG->>DB: Logs newly dispatched URLs permanently
+    User->{Server}: Uploads resume + locations
+    Server->>DB: Fetches previously sent job URLs (if any)
+    DB->>Server: Returns URL exclusion list
+    Server->>LG: Triggers graph execution with initial AgentState
+    
+    note over LG: [research Node]
+    LG->>LG: Parses resume DNA & infers best-fit job role
+    LG->>DB: Updates user's preferred job in DB
+    
+    note over LG: [scout Node]
+    LG->>LG: Generates search queries & retrieves Serper results
+    LG->>MCP: Requests deep SPA/page scraping for top URLs
+    MCP->>LG: Returns full scraped text (Jina/Playwright)
+    LG->>LG: Filters out stale jobs & scores matches (LLM) using URL exclusion list
+    
+    note over LG: [writer Node]
+    LG->>LG: Formats matches into email catalog with source tags
+    
+    note over LG: [alert Node]
+    LG->>Email: Dispatches personalized daily job catalog
+    Email->>User: Delivers targeted job alert email
+    LG->>DB: Permanently logs newly sent job URLs for deduplication
 ```
 
 ---
@@ -97,17 +105,33 @@ sequenceDiagram
 .
 ├── main.py                    # LangGraph compiler — defines state graph and execution edges
 ├── api.py                     # FastAPI router — onboarding endpoint, static views, APScheduler cron
+├── keep_alive.py              # Hugging Face Space Keep-Alive background utility
+├── Dockerfile                 # Docker configuration for Hugging Face Spaces deployment
+├── Procfile                   # Process file for Heroku/Render deployment
+├── nixpacks.toml              # Nixpacks build configuration
+├── requirements.txt           # Python project dependencies
 ├── agents/
 │   ├── state.py               # AgentState TypedDict (user params, scraped jobs, output emails)
 │   ├── config.py              # LLM client bootstrap with dynamic quota-based switchover
-│   ├── research_agent.py      # research_node — extracts technical credentials from resumes
-│   ├── scout_agent.py         # scout_node — Serper.dev searches, filtering, and LLM matching
-│   ├── writer_agent.py        # writer_node — structures job matches into personalized pitch
-│   └── alert_agent.py         # alert_node — SendGrid email delivery + SQLite URL logging
-├── mcp_servers/
-│   └── browser_mcp.py         # FastMCP server running headless Playwright for SPA scraping
-└── db/
-    └── database.py            # SQL schema setup, user insertions, job logs, deduplication
+│   ├── research_agent.py      # research_node — extracts credentials & infers job role from resume
+│   ├── scout_agent.py         # scout_node — query builder, Serper search, MCP scraper, LLM scoring
+│   ├── writer_agent.py        # writer_node — structures job matches into personalized catalog
+│   └── alert_agent.py         # alert_node — email dispatch (SendGrid / Resend / Gmail SMTP) + DB logger
+├── db/
+│   └── database.py            # SQLite schema configuration, user management, and URL logging
+├── evaluation/
+│   ├── test_cases.json        # Mock scenarios for testing the matching engine
+│   ├── eval_harness.py        # LLM-as-a-Judge benchmark scoring script
+│   └── eval_report.md         # Generated benchmark evaluation results
+├── static/
+│   ├── index.html             # Glassmorphic onboarding page front-end
+│   ├── app.js                 # Tag inputs, city autocomplete, and AJAX handler
+│   ├── style.css              # Custom responsive glassmorphism styles and animations
+│   ├── robots.txt             # Search engine crawler instructions
+│   └── sitemap.xml            # Sitemap for SEO indexing
+└── .github/
+    └── workflows/
+        └── keep_alive.yml     # GitHub Action scheduling keep-alive pings
 ```
 
 ---
@@ -139,15 +163,41 @@ Create a `.env` file in the root directory:
 # LLM Configuration
 GOOGLE_API_KEY=your_gemini_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
-USE_GEMINI=true   # Set to true to prioritize Gemini over Groq
+USE_GEMINI=true                 # Set to true to prioritize Gemini over Groq
 
 # Search Engine
 SERPER_API_KEY=your_serper_dev_api_key_here
 
-# Email Delivery
+# Email Delivery (Provide at least one method below)
+# Method A: SendGrid (Recommended for Production)
 SENDGRID_API_KEY=your_sendgrid_api_key_here
 EMAIL_SENDER=sender_verified_email@domain.com
+
+# Method B: Resend (Alternative Production Option)
+RESEND_API_KEY=your_resend_api_key_here
+
+# Method C: Gmail SMTP (Local Dev Only)
+EMAIL_PASSWORD=your_gmail_app_password_here
+
+# MCP Scraping Keys (Optional - Premium Speedups)
+APIFY_API_TOKEN=your_apify_api_token_here
+JINA_API_KEY=your_jina_reader_key_here
 ```
+
+### Environment Variables Details
+
+| Variable | Required / Optional | Description |
+|---|---|---|
+| `GOOGLE_API_KEY` | Required (if `USE_GEMINI=true`) | Gemini API access key. Used for `gemini-2.0-flash`. |
+| `GROQ_API_KEY` | Required (if no Gemini key) | Groq API access key. Falls back to `llama-3.1-8b-instant`. |
+| `USE_GEMINI` | Optional (Default: `false`) | Prioritizes Gemini over Groq for processing when set to `true`. |
+| `SERPER_API_KEY` | **Required** | Google Serper.dev API key to fetch organic Google search results. |
+| `SENDGRID_API_KEY` | Optional | Transactional email delivery API key. |
+| `EMAIL_SENDER` | Optional | Verified sender address for SendGrid/Gmail SMTP. |
+| `RESEND_API_KEY` | Optional | Transactional email delivery key via Resend (sends from `onboarding@resend.dev`). |
+| `EMAIL_PASSWORD` | Optional | App password generated for Gmail SMTP email dispatch (Local only). |
+| `APIFY_API_TOKEN` | Optional | Apify token to use their premium RAG web browser actor for headless scraping. |
+| `JINA_API_KEY` | Optional | Jina Reader token to speed up and authenticate web parsing. |
 
 ### 3. Initialize SQLite Schema
 
@@ -171,40 +221,8 @@ Open your browser to `http://127.0.0.1:8000` to access the onboarding page.
 
 1. Configure your Space to use the **Docker SDK**.
 2. The custom `Dockerfile` handles the Python 3.11 environment, installs OS dependencies for Chromium, downloads Playwright runtimes, and launches Uvicorn on port `7860`.
-3. Add the environment secrets inside the Space settings console:
-
-| Secret Key | Description |
-|---|---|
-| `GOOGLE_API_KEY` | Gemini API access |
-| `GROQ_API_KEY` | Groq LLM fallback |
-| `SERPER_API_KEY` | Google Serper.dev job search |
-| `SENDGRID_API_KEY` | Email delivery |
-| `EMAIL_SENDER` | Verified sender address |
-
----
-
-## 💻 Tech Stack & Open Source Ecosystem
-
-| Layer | Technology |
-|---|---|
-| **Stateful Orchestration** | LangGraph — dynamic multi-agent node transitions and memory preservation |
-| **Protocol Standard** | Model Context Protocol (MCP) via `fastmcp` — tool-calling agents with browser runtimes |
-| **LLM Backends** | Google Gemini (`gemini-2.0-flash`) + Groq (`llama-3.1-8b-instant`) with quota-based switchover |
-| **Database Layer** | Native SQLite (`data/career_pilot.db`) — user metadata and URL deduplication |
-| **Search Engine** | Serper.dev — Google Search API for organic job listing retrieval |
-| **Web Scraping** | Playwright (headless Chromium) via FastMCP — SPA-safe deep page extraction |
-| **Email Delivery** | SendGrid — transactional email dispatch with delivery tracking |
-| **Web UI** | FastAPI + HTML5 + Vanilla CSS — glassmorphic onboarding dashboard |
-
----
-
-## 🔒 Security & Privacy Policy
-
-- Candidate resume data is processed **in-memory only** and never persisted beyond the active pipeline run.
-- All job URL deduplication is stored locally in **SQLite on-instance** — no third-party data sharing.
-- Email dispatch uses **SendGrid's HTTPS API** exclusively; no plaintext credential transmission occurs.
-
----
+3. Add the environment secrets inside the Space settings console.
+4. **Persistent Database Storage**: SQLite database persistent storage is fully supported on Hugging Face Spaces. Create a persistent storage mount at `/data` in Space Settings (Storage Buckets), or pass the path via `HF_BUCKET_PATH` env var to prevent data loss when the space restarts.
 
 ---
 
@@ -271,4 +289,3 @@ The script will:
 ## 📜 License
 
 Licensed under the [MIT License](LICENSE). Created by **Vishnu P**.
-
