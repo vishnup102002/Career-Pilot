@@ -2,6 +2,8 @@ import json
 import re
 import os
 import sys
+import time
+import logging
 import http.client
 import asyncio
 from mcp import ClientSession, StdioServerParameters
@@ -10,6 +12,75 @@ from langchain_core.messages import HumanMessage
 from agents.state import AgentState
 from agents.config import llm
 
+logger = logging.getLogger("career_pilot.scout")
+
+# ── Token Budget Constants ──
+# Groq free tier: 6000 TPM for llama-3.1-8b-instant
+# ~4 chars per token average; reserve ~1500 tokens for prompt template + response
+MAX_SCRAPED_CHARS = 8000    # ~2000 tokens for job data
+MAX_PREV_JOBS_DISPLAY = 30  # Only show last 30 URLs in prompt (full list still used for dedup)
+MAX_LLM_RETRIES = 2         # Retry twice on rate limit before failover
+
+def _invoke_llm_with_resilience(prompt: str, max_retries: int = MAX_LLM_RETRIES) -> str:
+    """
+    Invokes the LLM with retry + exponential backoff for rate-limit errors (413/429),
+    progressively truncating the prompt on each retry.
+    Falls back to Gemini if Groq is fully exhausted.
+    """
+    current_prompt = prompt
+    
+    for attempt in range(max_retries + 1):
+        try:
+            if llm is None:
+                return '1. AI Engineer at Acme'
+            response = llm.invoke([HumanMessage(content=current_prompt)])
+            return response.content.strip()
+        except Exception as e:
+            error_str = str(e)
+            is_rate_limit = any(code in error_str for code in ['413', '429', 'rate_limit', 'tokens per minute'])
+            
+            if is_rate_limit and attempt < max_retries:
+                # Exponential backoff: 3s, then 6s
+                wait_time = 3 * (2 ** attempt)
+                logger.warning("   ⚠️ LLM rate limit hit (attempt {attempt + 1}/{max_retries + 1}). Truncating payload & retrying in {wait_time}s...")
+                time.sleep(wait_time)
+                
+                # Aggressively truncate the prompt for the next attempt
+                # Find the LIVE SEARCH section and shrink it
+                marker = 'LIVE SEARCH JOB RESULTS:'
+                if marker in current_prompt:
+                    parts = current_prompt.split(marker, 1)
+                    before = parts[0] + marker + '\n'
+                    after_marker = parts[1]
+                    # Find the next section boundary
+                    next_section = 'Previously Sent Jobs'
+                    if next_section in after_marker:
+                        job_text, rest = after_marker.split(next_section, 1)
+                        # Cut job text in half
+                        truncated_job = job_text[:len(job_text) // 2]
+                        current_prompt = before + truncated_job + next_section + rest
+                        logger.info("   📐 Prompt shrunk by ~{len(job_text) - len(truncated_job)} chars")
+                continue
+            
+            # If not a rate limit error or retries exhausted, try Gemini failover
+            if is_rate_limit:
+                logger.warning("   🔄 Groq exhausted after {max_retries + 1} attempts. Attempting Gemini failover...")
+                try:
+                    from langchain_google_genai import ChatGoogleGenerativeAI
+                    gemini_key = os.getenv('GOOGLE_API_KEY', '').strip()
+                    if gemini_key:
+                        fallback_llm = ChatGoogleGenerativeAI(model='gemini-2.0-flash')
+                        response = fallback_llm.invoke([HumanMessage(content=current_prompt)])
+                        logger.info("   ✅ Gemini failover succeeded!")
+                        return response.content.strip()
+                    else:
+                        logger.error("   ❌ No GOOGLE_API_KEY set — cannot failover to Gemini.")
+                except Exception as gemini_err:
+                    logger.error("   ❌ Gemini failover also failed: {gemini_err}")
+            
+            # Re-raise the original error if all recovery paths failed
+            raise
+
 def serper_search(query, num_results=10, time_filter="qdr:m"):
     """
     Uses Serper.dev to get real Google search results.
@@ -17,7 +88,7 @@ def serper_search(query, num_results=10, time_filter="qdr:m"):
     """
     api_key = os.getenv("SERPER_API_KEY", "").strip()
     if not api_key:
-        print("⚠️ Serper credentials missing in .env!")
+        logger.warning("⚠️ Serper credentials missing in .env!")
         return []
         
     results = []
@@ -45,7 +116,7 @@ def serper_search(query, num_results=10, time_filter="qdr:m"):
         json_data = json.loads(data.decode("utf-8"))
         
         if status_code != 200:
-            print(f"   ⚠️ Serper API returned status {status_code}: {json_data}")
+            logger.warning("   ⚠️ Serper API returned status {status_code}: {json_data}")
             return []
         
         # Parse organic results
@@ -58,9 +129,9 @@ def serper_search(query, num_results=10, time_filter="qdr:m"):
             })
         
         if not results:
-            print(f"   ⚠️ Serper returned 0 organic results. Raw keys: {list(json_data.keys())}")
+            logger.warning("   ⚠️ Serper returned 0 organic results. Raw keys: {list(json_data.keys())}")
     except Exception as e:
-        print(f"   ⚠️ Serper search failed: {e}")
+        logger.warning("   ⚠️ Serper search failed: {e}")
         
     return results
 
@@ -88,7 +159,7 @@ async def scrape_urls_with_mcp(urls):
                 tool_names = [t.name for t in tools.tools]
                 
                 if "scrape_multiple_job_descriptions" in tool_names:
-                    print(f"   🤖 MCP Client: Triggering batch tool scrape_multiple_job_descriptions for {len(urls)} URLs...")
+                    logger.info("   🤖 MCP Client: Triggering batch tool scrape_multiple_job_descriptions for {len(urls)} URLs...")
                     res = await session.call_tool("scrape_multiple_job_descriptions", arguments={"urls": urls})
                     if res.content and len(res.content) > 0:
                         try:
@@ -96,18 +167,18 @@ async def scrape_urls_with_mcp(urls):
                             if isinstance(parsed, dict):
                                 results = parsed
                         except Exception as parse_err:
-                            print(f"   ⚠️ MCP Client: Failed to parse batch JSON response: {parse_err}")
+                            logger.warning("   ⚠️ MCP Client: Failed to parse batch JSON response: {parse_err}")
                 else:
                     # Fallback to concurrent single tool calls
-                    print("   🤖 MCP Client: Batch tool not supported. Falling back to concurrent calls...")
+                    logger.info("   🤖 MCP Client: Batch tool not supported. Falling back to concurrent calls...")
                     async def call_tool_safe(url):
                         try:
-                            print(f"   🤖 MCP Client: Scraping via tool -> {url[:60]}...")
+                            logger.info("   🤖 MCP Client: Scraping via tool -> {url[:60]}...")
                             res = await session.call_tool("scrape_job_description", arguments={"url": url})
                             if res.content and len(res.content) > 0:
                                 return url, res.content[0].text
                         except Exception as err:
-                            print(f"   ⚠️ MCP Client tool call failed for {url[:50]}: {err}")
+                            logger.warning("   ⚠️ MCP Client tool call failed for {url[:50]}: {err}")
                         return url, ""
 
                     tasks = [call_tool_safe(url) for url in urls]
@@ -118,7 +189,7 @@ async def scrape_urls_with_mcp(urls):
                             results[url] = text
                         
     except Exception as e:
-        print(f"   🚨 Failed to connect to MCP Server: {e}")
+        logger.error("   🚨 Failed to connect to MCP Server: {e}")
         
     return results
 
@@ -129,6 +200,10 @@ def is_direct_job_url(url: str) -> bool:
     Returns True ONLY for URLs that clearly point to a single job posting.
     """
     lowercase_url = url.lower()
+    
+    # Special exception for Google Careers direct job URLs
+    if "careers.google.com/jobs/results/" in lowercase_url:
+        return True
     
     # 1. Aggressively reject known aggregator / listing index patterns
     aggregator_indicators = [
@@ -297,7 +372,7 @@ def scrape_multiple_urls(urls: list) -> dict:
     if not urls:
         return {}
         
-    print(f"   🤖 MCP Client: Connecting to Browser MCP Server for {len(urls)} URLs...")
+    logger.info("   🤖 MCP Client: Connecting to Browser MCP Server for {len(urls)} URLs...")
     import asyncio
     try:
         loop = asyncio.get_event_loop()
@@ -403,9 +478,9 @@ Reply with ONLY the query string, nothing else. No quotes."""
         try:
             extra_query = llm.invoke([HumanMessage(content=query_prompt)]).content.strip().replace('"', '')
             search_queries.append(extra_query)
-            print(f"   -> LLM-optimized query: {extra_query}")
+            logger.info("   -> LLM-optimized query: {extra_query}")
         except Exception as e:
-            print(f"   ⚠️ LLM query generation failed: {e}")
+            logger.warning("   ⚠️ LLM query generation failed: {e}")
     
     # Deduplicate and cap at 16 queries (balance coverage vs API cost)
     search_queries = list(dict.fromkeys(search_queries))[:16]
@@ -416,9 +491,8 @@ def scout_node(state: AgentState):
     try:
         return _scout_node_inner(state)
     except Exception as e:
-        print(f"🚨 ScoutAgent CRASHED: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("🚨 ScoutAgent CRASHED: {e}")
+        logger.exception("ScoutAgent crashed with traceback")
         return {"found_jobs": f"NO STRICT MATCHES FOUND TODAY. (Pipeline error: {str(e)[:100]})", "extracted_urls": []}
 
 def _scout_node_inner(state: AgentState):
@@ -426,12 +500,12 @@ def _scout_node_inner(state: AgentState):
     locations = state.get('locations', '').strip()
     resume_summary = state.get('resume_summary', '')
     
-    print(f"🕵️  ScoutAgent: Searching for '{preferred_job}' in [{locations}]...")
+    logger.info("🕵️  ScoutAgent: Searching for '{preferred_job}' in [{locations}]...")
     
     # Build optimized search queries
     search_queries = _build_search_queries(preferred_job, locations, resume_summary)
     
-    print(f"🌐 ScoutAgent: Executing {len(search_queries)} targeted Google searches...")
+    logger.info("🌐 ScoutAgent: Executing {len(search_queries)} targeted Google searches...")
     
     all_results = []
     seen_urls = set()
@@ -456,44 +530,44 @@ def _scout_node_inner(state: AgentState):
                     all_results.append(r)
                     new_count += 1
             stale_msg = f", {stale_count} stale filtered" if stale_count else ""
-            print(f"   ✅ '{query}': {len(results)} results ({new_count} new{stale_msg})")
+            logger.info("   ✅ '{query}': {len(results)} results ({new_count} new{stale_msg})")
         except Exception as e:
-            print(f"   ⚠️ Search failed for '{query}': {e}")
+            logger.warning("   ⚠️ Search failed for '{query}': {e}")
             continue
     
-    print(f"   🔍 Serper returned: {len(all_results)} total unique results")
+    logger.info("   🔍 Serper returned: {len(all_results)} total unique results")
     
     # Filter Serper results to prioritize direct job description URLs
     direct_job_results = [r for r in all_results if is_direct_job_url(r.get('href', ''))]
     rejected_results = [r for r in all_results if not is_direct_job_url(r.get('href', ''))]
     
-    print(f"   📊 URL filter: {len(direct_job_results)} direct jobs, {len(rejected_results)} aggregator/listing pages rejected")
+    logger.info("   📊 URL filter: {len(direct_job_results)} direct jobs, {len(rejected_results)} aggregator/listing pages rejected")
     if rejected_results:
         for r in rejected_results[:3]:
-            print(f"      ❌ Rejected: {r.get('href', '')[:80]}")
+            logger.debug("      ❌ Rejected: {r.get('href', '')[:80]}")
     
     # Use direct job results if we have enough, otherwise fall back to all results
     if len(direct_job_results) >= 3:
         scraped_data = direct_job_results
-        print(f"   ✅ Using {len(scraped_data)} direct job listings")
+        logger.info("   ✅ Using {len(scraped_data)} direct job listings")
     elif direct_job_results:
         # We have some direct results but not enough — supplement with non-rejected results
         scraped_data = direct_job_results + rejected_results
-        print(f"   ⚠️ Only {len(direct_job_results)} direct jobs found. Supplementing with all {len(scraped_data)} results.")
+        logger.warning("   ⚠️ Only {len(direct_job_results)} direct jobs found. Supplementing with all {len(scraped_data)} results.")
     else:
         scraped_data = all_results
-        print(f"   ⚠️ No direct job URLs found. Using all {len(all_results)} results.")
+        logger.warning("   ⚠️ No direct job URLs found. Using all {len(all_results)} results.")
 
     if len(scraped_data) == 0:
-        print("⚠️ ScoutAgent: No results from Serper. Skipping LLM matching.")
-        print(f"   📊 DIAGNOSTIC: {len(search_queries)} queries executed, {len(all_results)} total results, 0 after filtering")
+        logger.warning("⚠️ ScoutAgent: No results from Serper. Skipping LLM matching.")
+        logger.info("   📊 DIAGNOSTIC: {len(search_queries)} queries executed, {len(all_results)} total results, 0 after filtering")
         return {"found_jobs": "NO STRICT MATCHES FOUND TODAY. The job search returned zero results. Please try again later.", "extracted_urls": []}
 
     # Perform deep scraping of the top candidate URLs using Jina Reader
     candidates_to_scrape = scraped_data[:8]
     urls_to_scrape = [c.get('href') for c in candidates_to_scrape if c.get('href')]
     
-    print(f"🕵️  ScoutAgent: Deep scraping {len(urls_to_scrape)} top job URLs using Jina Reader...")
+    logger.info("🕵️  ScoutAgent: Deep scraping {len(urls_to_scrape)} top job URLs using Jina Reader...")
     scraped_contents = scrape_multiple_urls(urls_to_scrape)
     
     final_job_data = []
@@ -504,7 +578,7 @@ def _scout_node_inner(state: AgentState):
         # If we got the full text, perform deep validation for expiry and load issues
         if full_text:
             if _is_stale_job_content(full_text):
-                print(f"   ❌ Rejected (Expired/Closed in Full Text): {data.get('title', '')[:50]} -> {url[:50]}")
+                logger.info("   ❌ Rejected (Expired/Closed in Full Text): {data.get('title', '')[:50]} -> {url[:50]}")
                 continue
             
             final_job_data.append({
@@ -513,7 +587,7 @@ def _scout_node_inner(state: AgentState):
                 "text_source": "jina_reader",
                 "content": full_text[:6000] # Cap text to avoid context overload
             })
-            print(f"   ℹ️ Scraped full text: {data.get('title', '')[:50]} -> {url[:50]}")
+            logger.info("   ℹ️ Scraped full text: {data.get('title', '')[:50]} -> {url[:50]}")
         else:
             # Fallback to Serper snippet if scraping failed
             final_job_data.append({
@@ -522,13 +596,32 @@ def _scout_node_inner(state: AgentState):
                 "text_source": "serper_snippet",
                 "content": data.get('body')
             })
-            print(f"   ℹ️ Fallback to snippet: {data.get('title', '')[:50]} -> {url[:50]}")
+            logger.info("   ℹ️ Fallback to snippet: {data.get('title', '')[:50]} -> {url[:50]}")
             
-    print(f"   📊 Sending {len(final_job_data)} candidate jobs to LLM for matching")
+    logger.info("   📊 Sending {len(final_job_data)} candidate jobs to LLM for matching")
 
     scraped_text = json.dumps(final_job_data, indent=2)
+    
+    # ── Token-Aware Truncation ──
+    # Cap scraped text to stay within Groq's 6000 TPM budget
+    scraped_text_capped = scraped_text[:MAX_SCRAPED_CHARS]
+    if len(scraped_text) > MAX_SCRAPED_CHARS:
+        logger.info("   📐 Scraped text truncated: {len(scraped_text)} → {MAX_SCRAPED_CHARS} chars")
+    
+    # Only show the last N previously-sent URLs in the prompt (full list still used for dedup filtering)
+    prev_sent = state.get('previously_sent_jobs', [])
+    prev_sent_display = prev_sent[-MAX_PREV_JOBS_DISPLAY:] if len(prev_sent) > MAX_PREV_JOBS_DISPLAY else prev_sent
+    if len(prev_sent) > MAX_PREV_JOBS_DISPLAY:
+        logger.info("   📐 Previously sent URLs in prompt: showing last {MAX_PREV_JOBS_DISPLAY} of {len(prev_sent)}")
 
-    print("🕵️  ScoutAgent: Matching search results against Resume + Preferences...")
+    # Collect the set of valid input URLs for hallucination check later
+    valid_input_urls = set()
+    for job in final_job_data:
+        href = job.get('href', '')
+        if href:
+            valid_input_urls.add(href.rstrip('.,;:!?)'))
+
+    logger.info("🕵️  ScoutAgent: Matching search results against Resume + Preferences...")
     prompt = f"""
     You are a STRICT AI Job Matcher. Find ONLY jobs that genuinely match this candidate's profile.
     
@@ -540,10 +633,10 @@ def _scout_node_inner(state: AgentState):
     - Preferred Locations: {locations}
     
     LIVE SEARCH JOB RESULTS:
-    {scraped_text[:15000]}
+    {scraped_text_capped}
     
     Previously Sent Jobs (DO NOT suggest these URLs again):
-    {state.get('previously_sent_jobs', [])}
+    {prev_sent_display}
     
     Task: Find the top 1 to 5 jobs that STRICTLY MATCH this user's profile.
     
@@ -572,7 +665,7 @@ def _scout_node_inner(state: AgentState):
     
     If ZERO jobs pass 3+ criteria, reply with EXACTLY: "NO STRICT MATCHES FOUND TODAY."
     
-    CRITICAL URL RULE: Copy the EXACT 'href' URL from the JSON data. DO NOT modify or fabricate URLs!
+    CRITICAL URL RULE: You may ONLY use URLs from the 'href' fields in the JSON data above. DO NOT modify, shorten, or fabricate any URL. The total number of URLs in your response MUST NOT exceed the number of jobs in the JSON data.
     
     Format matches EXACTLY like this:
     1. [Job Title] at [Company] — [Location]
@@ -582,12 +675,12 @@ def _scout_node_inner(state: AgentState):
        Apply Here: [EXACT 'href' URL from the JSON data]
     """
     
-    response = llm.invoke([HumanMessage(content=prompt)]) if llm else type('obj', (object,), {'content': '1. AI Engineer at Acme'})()
-    response_content = response.content.strip()
+    # ── Resilient LLM Call with Retry + Failover ──
+    response_content = _invoke_llm_with_resilience(prompt)
     
     # If the LLM rejected all jobs, clear urls to prevent blacklisting in DB
     if "NO STRICT MATCHES FOUND TODAY" in response_content:
-        print("   🎯 LLM Decision: NO STRICT MATCHES FOUND TODAY.")
+        logger.info("   🎯 LLM Decision: NO STRICT MATCHES FOUND TODAY.")
         return {"found_jobs": "NO STRICT MATCHES FOUND TODAY.", "extracted_urls": []}
     
     # Extract URLs so we can save them in SQLite for deduction tomorrow
@@ -595,6 +688,13 @@ def _scout_node_inner(state: AgentState):
     # Clean trailing punctuation from URLs
     urls = [url.rstrip('.,;:!?)') for url in urls]
     
-    print(f"   🎯 LLM matched {len(urls)} job URLs")
+    # ── URL Hallucination Guard ──
+    # Only keep URLs that were actually present in the input data
+    verified_urls = [u for u in urls if u in valid_input_urls]
+    hallucinated_count = len(urls) - len(verified_urls)
+    if hallucinated_count > 0:
+        logger.warning("   ⚠️ URL Hallucination Guard: blocked {hallucinated_count} fabricated URL(s) from being logged")
     
-    return {"found_jobs": response_content, "extracted_urls": urls}
+    logger.info("   🎯 LLM matched {len(verified_urls)} verified job URLs (out of {len(urls)} extracted)")
+    
+    return {"found_jobs": response_content, "extracted_urls": verified_urls}

@@ -1,6 +1,11 @@
 # Environments
 .env
+.env.local
+.env.production
+
+# Virtual environments
 venv/
+.venv/
 
 # Databases
 db/*.db
@@ -11,6 +16,18 @@ data/
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
 
 # Mac OS
 .DS_Store
+
+# IDE
+.vscode/
+.idea/
