@@ -157,31 +157,10 @@ playwright install chromium --with-deps
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file in the root directory:
+Copy the provided secure environment template to `.env` and fill in your keys:
 
-```env
-# LLM Configuration
-GOOGLE_API_KEY=your_gemini_api_key_here
-GROQ_API_KEY=your_groq_api_key_here
-USE_GEMINI=true                 # Set to true to prioritize Gemini over Groq
-
-# Search Engine
-SERPER_API_KEY=your_serper_dev_api_key_here
-
-# Email Delivery (Provide at least one method below)
-# Method A: SendGrid (Recommended for Production)
-SENDGRID_API_KEY=your_sendgrid_api_key_here
-EMAIL_SENDER=sender_verified_email@domain.com
-
-# Method B: Resend (Alternative Production Option)
-RESEND_API_KEY=your_resend_api_key_here
-
-# Method C: Gmail SMTP (Local Dev Only)
-EMAIL_PASSWORD=your_gmail_app_password_here
-
-# MCP Scraping Keys (Optional - Premium Speedups)
-APIFY_API_TOKEN=your_apify_api_token_here
-JINA_API_KEY=your_jina_reader_key_here
+```bash
+cp .env.example .env
 ```
 
 ### Environment Variables Details
@@ -194,7 +173,7 @@ JINA_API_KEY=your_jina_reader_key_here
 | `SERPER_API_KEY` | **Required** | Google Serper.dev API key to fetch organic Google search results. |
 | `SENDGRID_API_KEY` | Optional | Transactional email delivery API key. |
 | `EMAIL_SENDER` | Optional | Verified sender address for SendGrid/Gmail SMTP. |
-| `RESEND_API_KEY` | Optional | Transactional email delivery key via Resend (sends from `onboarding@resend.dev`). |
+| `RESEND_API_KEY` | Optional | Transactional email delivery key via Resend. |
 | `EMAIL_PASSWORD` | Optional | App password generated for Gmail SMTP email dispatch (Local only). |
 | `APIFY_API_TOKEN` | Optional | Apify token to use their premium RAG web browser actor for headless scraping. |
 | `JINA_API_KEY` | Optional | Jina Reader token to speed up and authenticate web parsing. |
@@ -212,6 +191,13 @@ python api.py
 ```
 
 Open your browser to `http://127.0.0.1:8000` to access the onboarding page.
+
+---
+
+## 🏥 Production Health Check & Monitoring
+
+Career-Pilot includes a production-grade diagnostic endpoint:
+- **`GET /api/health`**: Returns real-time JSON report detailing system uptime, SQLite statistics (total users, logged emails), LLM connectivity status, and third-party environment credentials presence. Extremely useful for hosting platforms like Hugging Face Spaces or Uptime Kuma monitors.
 
 ---
 
@@ -251,10 +237,10 @@ We have configured a GitHub Actions workflow in `.github/workflows/keep_alive.ym
 
 ---
 
-## 🛠️ Tracing & Evaluation Harness
+## 🧪 Quality Assurance, Tracing & Evaluation
 
 ### 1. LangSmith Integration (Automatic Agent Tracing)
-Since `langsmith` is included in our `requirements.txt` and Career-Pilot uses standard LangChain/LangGraph model components, you can enable comprehensive state graph tracing simply by adding the following to your `.env` file:
+Since `langsmith` is included in our dependencies and Career-Pilot uses standard LangChain/LangGraph model components, you can enable comprehensive state graph tracing simply by adding the following to your `.env` file:
 ```ini
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_ENDPOINT="https://api.smith.langchain.com"
@@ -262,7 +248,20 @@ LANGCHAIN_API_KEY="your-langsmith-api-key-here"
 LANGCHAIN_PROJECT="career-pilot"
 ```
 
-### 2. LLM-as-a-Judge Evaluation Suite
+### 2. End-to-End Test Suite
+We have implemented a comprehensive 78-test E2E test suite covering unit level, integration flows, SQLite database managers, safety controls (preventing email HTML injections), and FastAPI routing.
+
+To run the automated tests:
+```bash
+python -m pytest tests/ -v
+```
+
+To run with coverage reporting:
+```bash
+python -m pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+### 3. LLM-as-a-Judge Evaluation Suite
 We have implemented a custom benchmark evaluation harness located under the `evaluation/` directory. It uses mock candidate scenarios and job postings to evaluate the scout matching agent's performance.
 
 To run the evaluation:
@@ -275,6 +274,7 @@ The script will:
 - Compute performance metrics: **Accuracy, Precision, Recall, and F1-Score**.
 - Run an independent **LLM-as-a-Judge** to evaluate the factual correctness and quality of the agent's matching reasoning (scored 1-5).
 - Print a diagnostic summary and save a markdown report to `evaluation/eval_report.md`.
+
 
 ---
 
