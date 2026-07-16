@@ -364,6 +364,237 @@ def _is_stale_job_content(text: str) -> bool:
             
     return False
 
+def _clean_scraped_markdown(text: str) -> str:
+    """
+    Strips LinkedIn/Jina Reader boilerplate (login modals, navigation bars,
+    cookie disclaimers, footer job lists, language selectors) so that the
+    core job description — including experience requirements — survives
+    the downstream character-limit truncation.
+    """
+    if not text:
+        return text
+
+    lines = text.split('\n')
+    cleaned_lines = []
+    in_boilerplate = False
+
+    # Patterns that indicate the START of boilerplate sections
+    boilerplate_start_patterns = [
+        r'sign\s*in',
+        r'log\s*in',
+        r'join\s*now',
+        r'forgot\s*password',
+        r'email\s*or\s*phone',
+        r'user\s*agreement',
+        r'privacy\s*policy',
+        r'cookie\s*policy',
+        r'copyright\s*policy',
+        r'brand\s*policy',
+        r'guest\s*controls',
+        r'community\s*guidelines',
+        r'similar\s*searches',
+        r'more\s*searches',
+        r'show\s*more',
+        r'show\s*fewer',
+        r'\d+\s*open\s*jobs',
+        r'open\s*jobs',
+        r'jobs\s*like\s*this',
+        r'people\s*also\s*viewed',
+        r'set\s*alert',
+        r'get\s*notified',
+        r'referrals\s+increase',
+        r'see\s+who\s+you\s+know',
+        r'agree\s*&\s*join',
+        r'sign\s+in\s+to\s+see',
+        r'العربية|বাংলা|Čeština|Dansk|Deutsch|Ελληνικά|Español|فارسی|Suomi|Français|हिंदी|Magyar',
+    ]
+    boilerplate_regex = re.compile('|'.join(boilerplate_start_patterns), re.IGNORECASE)
+
+    # Patterns that indicate real job content we must KEEP
+    keep_patterns = [
+        r'experience',
+        r'responsibilit',
+        r'requirement',
+        r'qualification',
+        r'key\s*skills',
+        r'required\s*skills',
+        r'good\s*to\s*have',
+        r'nice\s*to\s*have',
+        r'education',
+        r'job\s*type',
+        r'job\s*location',
+        r'work\s*mode',
+        r'work\s*shift',
+        r'seniority\s*level',
+        r'employment\s*type',
+        r'job\s*function',
+        r'industries',
+        r'technology',
+        r'salary|compensation|ctc',
+        r'about\s*(the\s*)?(role|company|us|position)',
+        r'\d+[–\-]\d+\s*years?',
+        r'\d+\+?\s*years?',
+        r'mid[\-\s]?senior',
+        r'entry[\-\s]?level',
+        r'fresher',
+        r'hiring',
+        r'engineer|developer|analyst|architect|scientist|designer|consultant',
+    ]
+    keep_regex = re.compile('|'.join(keep_patterns), re.IGNORECASE)
+
+    # URL-heavy lines are typically navigation/footer links
+    url_pattern = re.compile(r'https?://')
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Skip empty lines (but preserve paragraph breaks in cleaned output)
+        if not stripped:
+            if cleaned_lines and cleaned_lines[-1] != '':
+                cleaned_lines.append('')
+            continue
+
+        # Skip image markdown lines
+        if stripped.startswith('!['):
+            continue
+
+        # If the line has real job content, always keep it
+        if keep_regex.search(stripped):
+            in_boilerplate = False
+            cleaned_lines.append(stripped)
+            continue
+
+        # If line looks like boilerplate, start skipping
+        if boilerplate_regex.search(stripped):
+            in_boilerplate = True
+            continue
+
+        # If we're in a boilerplate block, keep skipping
+        if in_boilerplate:
+            continue
+
+        # Skip lines that are just markdown links with no real content
+        if stripped.startswith('[') and url_pattern.search(stripped) and len(stripped) < 200:
+            continue
+
+        # Skip very short lines that are just UI labels
+        if len(stripped) < 5 and not any(c.isalnum() for c in stripped):
+            continue
+
+        cleaned_lines.append(stripped)
+
+    result = '\n'.join(cleaned_lines).strip()
+    # Collapse runs of 3+ blank lines into 2
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result
+
+def _extract_experience_requirement(text: str) -> str:
+    """
+    Extracts the experience requirement from job description text using
+    regex patterns. Returns a human-readable string like '3-10 Years'
+    or 'Not specified' if nothing is found.
+    """
+    if not text:
+        return "Not specified"
+
+    # Ordered from most specific to least specific
+    patterns = [
+        # "Experience: 3–10 Years" or "Experience** 3-10 Years"
+        r'(?:experience|exp)[:\s*]*([\d]+\s*[–\-to]+\s*[\d]+\s*(?:years?|yrs?)(?:[^\n]{0,60}?))',
+        # "5+ years of experience" or "5+ years experience"
+        r'([\d]+\+?\s*(?:years?|yrs?)\s*(?:of\s+)?(?:experience|exp))',
+        # "Experience: 5+ years"
+        r'(?:experience|exp)[:\s*]*([\d]+\+?\s*(?:years?|yrs?))',
+        # "0-2 years" standalone
+        r'([\d]+\s*[–\-to]+\s*[\d]+\s*(?:years?|yrs?))',
+        # "Fresher" or "Entry Level"
+        r'(fresher|entry[\-\s]?level)',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = match.group(1).strip()
+            # Normalize dashes
+            result = result.replace('–', '-').replace('—', '-')
+            return result
+
+    # Check seniority level markers as fallback
+    seniority_patterns = [
+        (r'mid[\-\s]?senior\s*level', 'Mid-Senior level'),
+        (r'senior\s*level', 'Senior level'),
+        (r'entry[\-\s]?level', 'Entry level'),
+        (r'associate\s*level', 'Associate level'),
+        (r'director\s*level', 'Director level'),
+    ]
+    for pattern, label in seniority_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return label
+
+    return "Not specified"
+
+def _is_experience_mismatch(detected_experience: str, resume_summary: str) -> bool:
+    """
+    Returns True if the detected job experience requirement is clearly
+    incompatible with the candidate's experience level inferred from
+    their resume summary.
+
+    For fresher/junior profiles (0-2 years), rejects jobs requiring 3+ years.
+    For mid-level profiles (2-5 years), rejects jobs requiring 8+ years.
+    """
+    if not detected_experience or detected_experience == "Not specified":
+        return False
+
+    det_lower = detected_experience.lower()
+
+    # Determine candidate's approximate experience from resume
+    resume_lower = resume_summary.lower() if resume_summary else ""
+    is_fresher = any(kw in resume_lower for kw in [
+        'fresher', 'no professional experience', 'recent graduate',
+        'entry-level', 'entry level', '0 years', 'no experience',
+        'academic project', 'looking for entry', 'junior',
+        'b.tech graduate', 'btech graduate', 'recent b.tech',
+    ])
+
+    # Explicit seniority level mismatch
+    if is_fresher and any(kw in det_lower for kw in [
+        'mid-senior level', 'senior level', 'director level',
+        'lead', 'principal', 'architect', 'manager',
+    ]):
+        return True
+
+    # Extract the minimum years from the detected experience
+    range_match = re.search(r'(\d+)\s*[–\-to]+\s*(\d+)', det_lower)
+    plus_match = re.search(r'(\d+)\+', det_lower)
+    single_match = re.search(r'(\d+)\s*(?:years?|yrs?)', det_lower)
+
+    min_years = None
+    if range_match:
+        min_years = int(range_match.group(1))
+    elif plus_match:
+        min_years = int(plus_match.group(1))
+    elif single_match:
+        min_years = int(single_match.group(1))
+
+    if min_years is None:
+        return False
+
+    # Fresher/junior: reject if min requirement is 3+
+    if is_fresher and min_years >= 3:
+        return True
+
+    # For mid-level candidates (we can't always detect this, so be conservative)
+    # Only reject obviously senior roles (8+ years) for non-fresher candidates
+    if not is_fresher and min_years >= 8:
+        # Check if candidate has mid-level experience (2-5 years)
+        candidate_years_match = re.search(r'(\d+)\s*(?:years?|yrs?)\s*(?:of\s+)?experience', resume_lower)
+        if candidate_years_match:
+            candidate_years = int(candidate_years_match.group(1))
+            if candidate_years < min_years - 2:  # Allow 2-year buffer
+                return True
+
+    return False
+
 def scrape_multiple_urls(urls: list) -> dict:
     """
     Scrapes multiple URLs concurrently using the Browser MCP Server.
@@ -571,6 +802,7 @@ def _scout_node_inner(state: AgentState):
     scraped_contents = scrape_multiple_urls(urls_to_scrape)
     
     final_job_data = []
+    experience_rejected_count = 0
     for data in candidates_to_scrape:
         url = data.get('href')
         full_text = scraped_contents.get(url, "").strip()
@@ -581,23 +813,46 @@ def _scout_node_inner(state: AgentState):
                 logger.info("   ❌ Rejected (Expired/Closed in Full Text): {data.get('title', '')[:50]} -> {url[:50]}")
                 continue
             
+            # ── Clean boilerplate BEFORE truncation so experience data survives ──
+            cleaned_text = _clean_scraped_markdown(full_text)
+            detected_exp = _extract_experience_requirement(cleaned_text)
+            
+            # ── Experience Mismatch Pre-filter ──
+            if _is_experience_mismatch(detected_exp, resume_summary):
+                logger.info("   ❌ Rejected (Experience Mismatch: {detected_exp}): {data.get('title', '')[:50]} -> {url[:50]}")
+                experience_rejected_count += 1
+                continue
+            
             final_job_data.append({
                 "title": data.get('title'),
                 "href": url,
                 "text_source": "jina_reader",
-                "content": full_text[:6000] # Cap text to avoid context overload
+                "detected_experience": detected_exp,
+                "content": cleaned_text[:6000]  # Now truncates CLEANED text
             })
-            logger.info("   ℹ️ Scraped full text: {data.get('title', '')[:50]} -> {url[:50]}")
+            logger.info("   ℹ️ Scraped full text (exp: {detected_exp}): {data.get('title', '')[:50]} -> {url[:50]}")
         else:
             # Fallback to Serper snippet if scraping failed
+            snippet = data.get('body', '')
+            detected_exp = _extract_experience_requirement(snippet) if snippet else "Not specified"
+            
+            # Pre-filter snippets too
+            if _is_experience_mismatch(detected_exp, resume_summary):
+                logger.info("   ❌ Rejected (Experience Mismatch from snippet: {detected_exp}): {data.get('title', '')[:50]} -> {url[:50]}")
+                experience_rejected_count += 1
+                continue
+            
             final_job_data.append({
                 "title": data.get('title'),
                 "href": url,
                 "text_source": "serper_snippet",
-                "content": data.get('body')
+                "detected_experience": detected_exp,
+                "content": snippet
             })
-            logger.info("   ℹ️ Fallback to snippet: {data.get('title', '')[:50]} -> {url[:50]}")
-            
+            logger.info("   ℹ️ Fallback to snippet (exp: {detected_exp}): {data.get('title', '')[:50]} -> {url[:50]}")
+    
+    if experience_rejected_count:
+        logger.info("   📊 Experience pre-filter: rejected {experience_rejected_count} job(s) due to experience mismatch")
     logger.info("   📊 Sending {len(final_job_data)} candidate jobs to LLM for matching")
 
     scraped_text = json.dumps(final_job_data, indent=2)
@@ -644,14 +899,14 @@ def _scout_node_inner(state: AgentState):
     
     IMMEDIATELY REJECT any job that:
     1. ❌ STALE/EXPIRED: Contains phrases like "no longer accepting", "X year(s) ago", "position filled", "closed", "expired", "0 applicants" with old dates. Only include jobs that appear RECENTLY POSTED (within the last 30 days).
-    2. ❌ EXPERIENCE MISMATCH: If the user is a fresher/junior (0-1 years), REJECT jobs requiring 3+ years of experience. If the user has 2-4 years, REJECT jobs requiring 7+ years. Experience level MUST be compatible.
+    2. ❌ EXPERIENCE MISMATCH: If the user is a fresher/junior (0-1 years), REJECT jobs requiring 3+ years of experience. If the user has 2-4 years, REJECT jobs requiring 7+ years. Experience level MUST be compatible. CHECK the 'detected_experience' field in each job entry — this is the GROUND TRUTH experience requirement extracted from the job page. If it says '3-10 Years' or 'Mid-Senior level', the job requires significant experience.
     3. ❌ SENIOR ROLE MISMATCH: REJECT "Senior", "Staff", "Principal", "Lead", "Architect", "Manager" level roles for fresher/junior candidates.
     
     ═══ EVALUATION CRITERIA (score remaining jobs out of 5) ═══
     
     1. JOB ROLE MATCH: Title must be related to "{preferred_job}" or a closely adjacent field.
     2. LOCATION MATCH: Must be in {locations}, or remote. If unclear, assume match.
-    3. EXPERIENCE MATCH: User's experience level must fit. For freshers: 0-1 year roles only. For juniors: 0-2 year roles.
+    3. EXPERIENCE MATCH: User's experience level must fit. For freshers: 0-1 year roles only. For juniors: 0-2 year roles. USE the 'detected_experience' field from the JSON data.
     4. SKILL MATCH: User should possess at least 60% of core skills mentioned.
     5. FRESHNESS: Job must appear to be recently posted (not months/years old).
     
@@ -667,10 +922,12 @@ def _scout_node_inner(state: AgentState):
     
     CRITICAL URL RULE: You may ONLY use URLs from the 'href' fields in the JSON data above. DO NOT modify, shorten, or fabricate any URL. The total number of URLs in your response MUST NOT exceed the number of jobs in the JSON data.
     
+    CRITICAL EXPERIENCE RULE: The 'Experience Required' field in your output MUST be copied VERBATIM from the 'detected_experience' field in the JSON data. If no 'detected_experience' is provided, write 'Not specified in job text'. You MUST NEVER output the candidate's own experience level (e.g., do NOT write '0-2 years / Junior' if the job requires '3-10 Years').
+    
     Format matches EXACTLY like this:
     1. [Job Title] at [Company] — [Location]
        Match Score: [e.g., 85%]
-       Experience Required: [e.g., 0-2 years / Fresher / Not specified]
+       Experience Required: [COPY from 'detected_experience' field, e.g., 3-10 Years / Fresher / Not specified in job text]
        Why it's a match: [Specific skills from their resume that align + experience fit]
        Apply Here: [EXACT 'href' URL from the JSON data]
     """

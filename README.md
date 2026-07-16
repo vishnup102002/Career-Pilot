@@ -53,7 +53,7 @@ graph TD
 | Agent / Node | Role | Key Output / Action |
 | :--- | :--- | :--- |
 | **📚 Research Agent** (`research`) | Parses uploaded resume to extract a structured technical DNA report — core stacks, years of experience, location constraints, and best-fit role inference. Updates the user's inferred job role in SQLite database. | `resume_summary`, `preferred_job` |
-| **🕵️ Scout Agent** (`scout`) | Generates multi-variant search queries against LinkedIn, Indeed, Naukri, and WeWorkRemotely; filters aggregator URLs; runs headless Playwright scraping via FastMCP (with premium Jina/Apify options); and scores listings (score ≥ 3/5). | `found_jobs` (filtered match text), `extracted_urls` |
+| **🕵️ Scout Agent** (`scout`) | Generates multi-variant search queries against LinkedIn, Indeed, Naukri, and WeWorkRemotely; filters aggregator URLs; cleans markdown boilerplate; extracts experience requirements; pre-filters experience mismatches; runs headless Playwright scraping via FastMCP (with premium Jina/Apify options); and scores listings (score ≥ 3/5). | `found_jobs` (filtered match text), `extracted_urls` |
 | **✍️ Writer Agent** (`writer`) | Maps job relevance to resume history; tags listings with source platform markers (📍 via LinkedIn, 📍 via Indeed); builds a high-impact bulleted catalog. | `drafted_response` |
 | **🚨 Alert Agent** (`alert`) | Delivers the formatted catalog via SendGrid, Resend, or Gmail SMTP; permanently indexes dispatched URLs in SQLite on success to prevent duplicate alerts. | Email sent + `extracted_urls` logged in DB |
 
@@ -114,9 +114,11 @@ sequenceDiagram
 │   ├── state.py               # AgentState TypedDict (user params, scraped jobs, output emails)
 │   ├── config.py              # LLM client bootstrap with dynamic quota-based switchover
 │   ├── research_agent.py      # research_node — extracts credentials & infers job role from resume
-│   ├── scout_agent.py         # scout_node — query builder, Serper search, MCP scraper, LLM scoring
+│   ├── scout_agent.py         # scout_node — query builder, Serper search, MCP scraper, boilerplate cleaning, LLM scoring
 │   ├── writer_agent.py        # writer_node — structures job matches into personalized catalog
 │   └── alert_agent.py         # alert_node — email dispatch (SendGrid / Resend / Gmail SMTP) + DB logger
+├── mcp_servers/
+│   └── browser_mcp.py         # FastMCP Server providing Playwright, Jina Reader & Apify batch scrapers
 ├── db/
 │   └── database.py            # SQLite schema configuration, user management, and URL logging
 ├── evaluation/
@@ -249,7 +251,7 @@ LANGCHAIN_PROJECT="career-pilot"
 ```
 
 ### 2. End-to-End Test Suite
-We have implemented a comprehensive 78-test E2E test suite covering unit level, integration flows, SQLite database managers, safety controls (preventing email HTML injections), and FastAPI routing.
+We have implemented a comprehensive 81-test E2E test suite covering unit level, integration flows, SQLite database managers, safety controls (preventing email HTML injections), experience mismatch pre-filtering, and FastAPI routing.
 
 To run the automated tests:
 ```bash

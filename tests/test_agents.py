@@ -324,3 +324,102 @@ class TestHtmlSanitization:
         text = "Line 1\nLine 2"
         result = _sanitize_for_html(text)
         assert "<br>" in result
+
+
+# ── Scout Agent Experience & Cleaning Tests ──
+
+class TestScoutExperienceHandling:
+    """Tests for scraped markdown boilerplate cleaning and experience mismatch detection."""
+
+    def test_clean_scraped_markdown_strips_boilerplate(self):
+        from agents.scout_agent import _clean_scraped_markdown
+
+        raw_markdown = """
+        [Skip to main content](https://linkedin.com)
+        Sign in
+        Join now
+        Email or phone
+        Password
+        By clicking Continue to join or sign in, you agree to User Agreement and Privacy Policy.
+
+        DigitalXNode hiring AI/ML Engineer in Kochi, Kerala, India
+
+        Join a growing AI team in Kochi and work on cutting-edge Generative AI.
+        **Experience**3–10 Years (flexible for exceptional candidates up to 12 years)
+
+        Key Responsibilities
+        * Design and deploy LLM-based applications
+        * Build RAG pipelines
+
+        Required Skills
+        * Python, FastAPI, PyTorch
+
+        Mid-Senior level
+
+        Intelligence Specialist jobs 315 open jobs
+        Scientist jobs 2,584 open jobs
+        User Agreement Cookie Policy Copyright Policy
+        العربية Deutsch Français
+        """
+
+        cleaned = _clean_scraped_markdown(raw_markdown)
+
+        # Verify boilerplate noise is stripped
+        assert "Sign in" not in cleaned
+        assert "Join now" not in cleaned
+        assert "Email or phone" not in cleaned
+        assert "Intelligence Specialist jobs" not in cleaned
+        assert "User Agreement Cookie Policy" not in cleaned
+
+        # Verify core content and experience requirements survive
+        assert "DigitalXNode hiring AI/ML Engineer" in cleaned
+        assert "**Experience**3–10 Years" in cleaned
+        assert "Key Responsibilities" in cleaned
+        assert "Mid-Senior level" in cleaned
+
+    def test_extract_experience_requirement(self):
+        from agents.scout_agent import _extract_experience_requirement
+
+        # Range pattern with en-dash
+        text1 = "Join a team. **Experience**3–10 Years (flexible)"
+        assert _extract_experience_requirement(text1) == "3-10 Years"
+
+        # Explicit plus pattern
+        text2 = "Looking for a developer. Experience: 5+ years with Python."
+        assert _extract_experience_requirement(text2) == "5+ years"
+
+        # Seniority level fallback
+        text3 = "Role: Senior ML Engineer\nSeniority level: Mid-Senior level"
+        assert _extract_experience_requirement(text3) == "Mid-Senior level"
+
+        # Fresher
+        text4 = "Entry Level position for freshers."
+        assert _extract_experience_requirement(text4).lower() in ["fresher", "entry level", "entry-level"]
+
+        # Missing experience
+        text5 = "We are hiring a Python Engineer for our Kochi office."
+        assert _extract_experience_requirement(text5) == "Not specified"
+
+    def test_is_experience_mismatch(self):
+        from agents.scout_agent import _is_experience_mismatch
+
+        fresher_resume = "Recent B.Tech graduate with Python, RAG projects. No professional experience (fresher), looking for entry-level positions."
+
+        # Rejects 3-10 years for fresher candidate
+        assert _is_experience_mismatch("3-10 Years", fresher_resume) is True
+
+        # Rejects 5+ years for fresher candidate
+        assert _is_experience_mismatch("5+ years", fresher_resume) is True
+
+        # Rejects Mid-Senior level for fresher candidate
+        assert _is_experience_mismatch("Mid-Senior level", fresher_resume) is True
+
+        # Accepts 0-2 years for fresher candidate
+        assert _is_experience_mismatch("0-2 Years", fresher_resume) is False
+
+        # Accepts Fresher for fresher candidate
+        assert _is_experience_mismatch("Fresher", fresher_resume) is False
+
+        # Accepts Not specified (delegated to LLM scoring)
+        assert _is_experience_mismatch("Not specified", fresher_resume) is False
+
