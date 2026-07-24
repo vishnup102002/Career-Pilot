@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #05070d; rx: 8px; stroke: #0f172a; stroke-width: 2; }
+      .header-title { font-family: 'Space Grotesk', 'Fira Code', monospace; font-size: 13px; fill: #38bdf8; font-weight: 700; letter-spacing: 1.5px; }
+      .container-box { fill: rgba(15, 23, 42, 0.4); stroke: #1e293b; stroke-width: 1.5; rx: 8px; }
+      .box { fill: #0f172a; stroke: #1e293b; stroke-width: 1.5; rx: 6px; }
+      .box-active { fill: #0c1a2e; stroke: #38bdf8; stroke-width: 1.5; rx: 6px; }
+      .box-mcp { fill: #082f25; stroke: #10b981; stroke-width: 1.5; rx: 6px; }
+      .box-dedupe { fill: #2a1b08; stroke: #f59e0b; stroke-width: 1.5; rx: 6px; }
+      .box-alert { fill: #220a11; stroke: #f43f5e; stroke-width: 1.5; rx: 6px; }
+      .txt-title { font-family: 'Inter', sans-serif; font-size: 11px; fill: #f8fafc; font-weight: 700; }
+      .txt-sub { font-family: 'JetBrains Mono', monospace; font-size: 9px; fill: #94a3b8; }
+      .txt-mcp { font-family: 'JetBrains Mono', monospace; font-size: 9px; fill: #6ee7b7; }
+      .line { stroke: #334155; stroke-width: 2; fill: none; stroke-dasharray: 4 4; }
+      .status { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: #10b981; font-weight: 700; }
+    </style>
+    <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-green" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-gold" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1000" height="600" class="bg" />
+  <text x="25" y="32" class="header-title">> CAREER-PILOT // END-TO-END AGENTIC PIPELINE ARCHITECTURE</text>
+
+  <!-- Flow Paths -->
+  <path id="path-top" d="M 160 90 L 230 90 M 370 90 L 440 90 M 580 90 L 650 90" class="line" />
+  <path id="path-ingest" d="M 800 115 L 800 150 L 150 150 L 150 200" class="line" />
+  <path id="path-agents" d="M 230 260 L 270 260 M 450 260 L 490 260 M 670 260 L 710 260" class="line" />
+  <path id="path-mcp" d="M 360 310 L 360 410" class="line" />
+  <path id="path-dedupe" d="M 800 310 L 800 450 L 690 450" class="line" />
+  <path id="path-inbox" d="M 800 310 L 800 500" class="line" />
+
+  <!-- 1. TOP ROW: INGESTION TIER -->
+  <g transform="translate(25, 65)">
+    <rect width="135" height="50" class="box" />
+    <text x="12" y="20" class="txt-title">Candidate UI</text>
+    <text x="12" y="35" class="txt-sub">Resume PDF / Prefs</text>
+  </g>
+
+  <g transform="translate(235, 65)">
+    <rect width="135" height="50" class="box-active" />
+    <text x="12" y="20" class="txt-title">FastAPI Router</text>
+    <text x="12" y="35" class="txt-sub">PyPDF2 Parser</text>
+  </g>
+
+  <g transform="translate(445, 65)">
+    <rect width="135" height="50" class="box" />
+    <text x="12" y="20" class="txt-title">SQLite User DB</text>
+    <text x="12" y="35" class="txt-sub">Candidate Profile</text>
+  </g>
+
+  <g transform="translate(655, 65)">
+    <rect width="290" height="50" class="box-active" />
+    <text x="14" y="20" class="txt-title">LangGraph State Machine</text>
+    <text x="14" y="35" class="txt-sub">typed_state: AgentState Dict</text>
+  </g>
+
+  <!-- 2. MIDDLE CONTAINER: LANGGRAPH 4-AGENT PIPELINE -->
+  <rect x="25" y="160" width="950" height="200" class="container-box" />
+  <text x="40" y="185" class="header-title" font-size="10px" fill="#94a3b8">LANGGRAPH SEQUENTIAL AGENT PIPELINE</text>
+
+  <!-- Agent 1: Research -->
+  <g transform="translate(50, 200)">
+    <rect width="180" height="120" class="box" />
+    <text x="14" y="24" class="txt-title">1. RESEARCH NODE</text>
+    <text x="14" y="48" class="txt-sub">• Resume Parsing</text>
+    <text x="14" y="66" class="txt-sub">• Role Inference</text>
+    <text x="14" y="84" class="txt-sub">• Skills Vectorizing</text>
+    <text x="14" y="102" class="txt-sub">• Save Inferred Role</text>
+  </g>
+
+  <!-- Agent 2: Scout -->
+  <g transform="translate(270, 200)">
+    <rect width="180" height="120" class="box-active" />
+    <text x="14" y="24" class="txt-title">2. SCOUT NODE</text>
+    <text x="14" y="48" class="txt-sub">• Multi-query Serper</text>
+    <text x="14" y="66" class="txt-sub">• Direct URL Filter</text>
+    <text x="14" y="84" class="txt-sub">• FastMCP Scraping</text>
+    <text x="14" y="102" class="txt-sub">• LLM Fit Score (≥3)</text>
+  </g>
+
+  <!-- Agent 3: Writer -->
+  <g transform="translate(490, 200)">
+    <rect width="180" height="120" class="box-active" />
+    <text x="14" y="24" class="txt-title">3. WRITER NODE</text>
+    <text x="14" y="48" class="txt-sub">• Resume-Job Match</text>
+    <text x="14" y="66" class="txt-sub">• Source Tagging</text>
+    <text x="14" y="84" class="txt-sub">• Alignment Bullet</text>
+    <text x="14" y="102" class="txt-sub">• Pitch Drafting</text>
+  </g>
+
+  <!-- Agent 4: Alert -->
+  <g transform="translate(710, 200)">
+    <rect width="180" height="120" class="box-alert" />
+    <text x="14" y="24" class="txt-title" fill="#f43f5e">4. ALERT NODE</text>
+    <text x="14" y="48" class="txt-sub">• Dispatch Email</text>
+    <text x="14" y="66" class="txt-sub">• SendGrid / Resend</text>
+    <text x="14" y="84" class="txt-sub">• Log Dispatched URLs</text>
+    <text x="14" y="102" class="txt-sub">• Complete Execution</text>
+  </g>
+
+  <!-- 3. BOTTOM TIER COMPONENTS -->
+  <!-- FastMCP Server -->
+  <g transform="translate(260, 410)">
+    <rect width="200" height="80" class="box-mcp" />
+    <text x="14" y="22" class="txt-title" fill="#10b981">MCP TOOL SERVER</text>
+    <text x="14" y="42" class="txt-mcp">• Playwright Headless SPA</text>
+    <text x="14" y="58" class="txt-mcp">• Jina Reader Markdown</text>
+  </g>
+
+  <!-- Deduplication Index -->
+  <g transform="translate(490, 410)">
+    <rect width="200" height="80" class="box-dedupe" />
+    <text x="14" y="22" class="txt-title" fill="#f59e0b">PERSISTENT DEDUPE</text>
+    <text x="14" y="42" class="txt-sub" fill="#fde68a">• SQLite sent_jobs Table</text>
+    <text x="14" y="58" class="txt-sub" fill="#fde68a">• Zero Duplicate Guarantee</text>
+  </g>
+
+  <!-- User Inbox -->
+  <g transform="translate(720, 500)">
+    <rect width="160" height="45" class="box-alert" />
+    <text x="14" y="20" class="txt-title" fill="#f43f5e">User Inbox Alert</text>
+    <text x="14" y="34" class="txt-sub">Daily Job Digest Email</text>
+  </g>
+
+  <!-- 4. SMIL ANIMATED LIGHT PULSES -->
+  <circle r="5" fill="#38bdf8" filter="url(#glow-cyan)">
+    <animateMotion dur="3s" repeatCount="indefinite" path="M 160 90 L 230 90 M 370 90 L 440 90 M 580 90 L 650 90" />
+  </circle>
+
+  <circle r="6" fill="#38bdf8" filter="url(#glow-cyan)">
+    <animateMotion dur="4s" repeatCount="indefinite" path="M 800 115 L 800 150 L 150 150 L 150 200 M 230 260 L 270 260 M 450 260 L 490 260 M 670 260 L 710 260" />
+  </circle>
+
+  <circle r="5" fill="#10b981" filter="url(#glow-green)">
+    <animateMotion dur="2.2s" repeatCount="indefinite" path="M 360 310 L 360 410" />
+  </circle>
+
+  <circle r="5" fill="#f59e0b" filter="url(#glow-gold)">
+    <animateMotion dur="2.5s" repeatCount="indefinite" path="M 800 310 L 800 450 L 690 450" />
+  </circle>
+
+  <circle r="5" fill="#f43f5e">
+    <animateMotion dur="2s" repeatCount="indefinite" path="M 800 310 L 800 500" />
+  </circle>
+
+  <!-- 5. FOOTER TELEMETRY -->
+  <line x1="25" y1="565" x2="975" y2="565" stroke="#1e293b" stroke-width="1" />
+  <text x="25" y="582" class="status">● CRON: APSCHEDULER (9:00 AM IST)</text>
+  <text x="360" y="582" class="status" fill="#38bdf8">LLM: GEMINI 2.0 FLASH ↔ GROQ LLAMA 3.1 8B</text>
+  <text x="770" y="582" class="status" fill="#f59e0b">DEDUPE: SQLITE UNIQUE INDEX</text>
+</svg>
